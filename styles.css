@@ -1827,12 +1827,28 @@ button[data-open-degrees].btn-glow {
 }
 .fb-base { font-weight: 600; color: var(--accent); }
 .fb-board { display: grid; gap: 0.35rem; }
+.fb-nums,
 .fb-string {
   display: grid;
   grid-template-columns: 2rem repeat(5, 1fr);
   gap: 0.25rem;
   align-items: center;
 }
+.fb-nums {
+  margin-bottom: 0.1rem;
+  pointer-events: none;
+}
+.fb-nums__open,
+.fb-nums__n {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-mute);
+  line-height: 1;
+  padding: 0 0 0.15rem;
+}
+.fb-nums__n { color: var(--ink-soft); }
 .fb-open, .fb-cell {
   appearance: none;
   border: 1px solid var(--line);

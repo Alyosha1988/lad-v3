@@ -128,6 +128,13 @@ function renderGuitarBoard() {
   const frets = state.frets;
   const base = state.baseFret;
   const nut = base <= 1;
+  const fretNums = [];
+  for (let rel = 1; rel <= 5; rel++) {
+    fretNums.push(nut ? rel : base + rel - 1);
+  }
+  const numsRow = `<div class="fb-nums" aria-hidden="true"><span class="fb-nums__open"></span>${fretNums
+    .map((n) => `<span class="fb-nums__n">${n}</span>`)
+    .join("")}</div>`;
   let cells = "";
   for (let s = 0; s < 6; s++) {
     const f = frets[s];
@@ -136,7 +143,7 @@ function renderGuitarBoard() {
     cells += `<div class="fb-string" data-string="${s}">`;
     cells += `<button type="button" class="fb-open ${openOn ? "is-on" : ""} ${muteOn ? "is-mute" : ""}" data-fret-open="${s}" aria-label="Открытая/глушение">${muteOn ? "×" : openOn ? "○" : "·"}</button>`;
     for (let rel = 1; rel <= 5; rel++) {
-      const abs = nut ? rel : base + rel - 1;
+      const abs = fretNums[rel - 1];
       const on = f === abs;
       cells += `<button type="button" class="fb-cell ${on ? "is-on" : ""}" data-string="${s}" data-fret="${abs}" aria-label="Струна ${s + 1} лад ${abs}"></button>`;
     }
@@ -149,7 +156,7 @@ function renderGuitarBoard() {
         <span class="fb-base">${nut ? "Порог" : `${base}fr`}</span>
         <button type="button" class="btn btn-ghost btn-tiny" id="fbNext">→</button>
       </div>
-      <div class="fb-board" id="fbBoard">${cells}</div>
+      <div class="fb-board" id="fbBoard">${numsRow}${cells}</div>
       <div class="fb-actions">
         <button type="button" class="btn btn-ghost" id="fbHear">Послушать захват</button>
         <button type="button" class="btn btn-ghost" id="fbClear">Сбросить гриф</button>
