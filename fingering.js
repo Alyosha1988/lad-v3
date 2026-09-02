@@ -2,8 +2,13 @@
  * Рифф — отрисовка аппликатур (гитара / рояль).
  * База постановок — voicings.js (подключать раньше).
  */
-const FRET_MUTE = typeof window !== "undefined" && window.FRET_MUTE !== undefined ? window.FRET_MUTE : -1;
-const FRET_OPEN = typeof window !== "undefined" && window.FRET_OPEN !== undefined ? window.FRET_OPEN : 0;
+
+function _fretMute() {
+  return typeof window !== "undefined" && window.FRET_MUTE !== undefined ? window.FRET_MUTE : -1;
+}
+function _fretOpen() {
+  return typeof window !== "undefined" && window.FRET_OPEN !== undefined ? window.FRET_OPEN : 0;
+}
 
 function computeBaseFret(frets) {
   const played = frets.filter((f) => f > 0);
