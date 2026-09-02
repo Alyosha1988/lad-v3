@@ -2007,3 +2007,8 @@ button[data-open-degrees].btn-glow {
   color: var(--accent);
   font-size: 0.9rem;
 }
+
+.detect-alts {
+  margin: 0.35rem 0 0.15rem;
+  flex-wrap: wrap;
+}

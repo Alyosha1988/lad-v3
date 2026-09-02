@@ -13,6 +13,7 @@ const state = {
   piano: [],
   baseFret: 1,
   detected: null, // { symbol, score, reason }
+  detectHits: [],
   selectedVoicingId: null,
   /** @type {{ id, symbol, voicing }[]} */
   slots: [],
