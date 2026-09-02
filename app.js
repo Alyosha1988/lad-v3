@@ -57,16 +57,16 @@ function render() {
 
 function detectNow() {
   state.detected = null;
+  state.detectHits = [];
   state.selectedVoicingId = null;
+  let hits = [];
   if (state.inputMode === "guitar") {
-    if (typeof identifyFromFrets === "function") {
-      const hits = identifyFromFrets(state.frets) || [];
-      state.detected = hits[0] || null;
-    }
+    if (typeof identifyFromFrets === "function") hits = identifyFromFrets(state.frets) || [];
   } else if (typeof identifyFromMidis === "function") {
-    const hits = identifyFromMidis(state.piano) || [];
-    state.detected = hits[0] || null;
+    hits = identifyFromMidis(state.piano) || [];
   }
+  state.detectHits = hits;
+  state.detected = hits[0] || null;
 }
 
 function currentVoicings() {
@@ -109,7 +109,7 @@ function renderGuitarBoard() {
     const openOn = f === 0;
     const muteOn = f < 0;
     cells += `<div class="fb-string" data-string="${s}">`;
-    cells += `<button type="button" class="fb-open ${openOn ? "is-on" : ""} ${muteOn ? "is-mute" : ""}" data-fret-open="${s}" aria-label="Открытая/глушение">${muteOn ? "×" : "○"}</button>`;
+    cells += `<button type="button" class="fb-open ${openOn ? "is-on" : ""} ${muteOn ? "is-mute" : ""}" data-fret-open="${s}" aria-label="Открытая/глушение">${muteOn ? "×" : openOn ? "○" : "·"}</button>`;
     for (let rel = 1; rel <= 5; rel++) {
       const abs = nut ? rel : base + rel - 1;
       const on = f === abs;
@@ -209,6 +209,13 @@ function renderFret() {
   if (list.length && !state.selectedVoicingId) state.selectedVoicingId = list[0].id;
   const sym = state.detected?.symbol || "";
   const reason = state.detected?.reason || "";
+  const altChips = (state.detectHits || [])
+    .slice(0, 5)
+    .map(
+      (h) =>
+        `<button type="button" class="chip chip-btn ${h.symbol === sym ? "is-on chip-accent" : ""}" data-pick-detect="${h.symbol}" title="${h.reason}">${h.symbol}</button>`
+    )
+    .join("");
 
   stage.innerHTML = `
     <p class="kicker">Рифф</p>
@@ -217,10 +224,14 @@ function renderFret() {
     <div class="chip-row">
       <button type="button" class="chip chip-btn ${state.inputMode === "guitar" ? "is-on" : ""}" data-input="guitar">Гитара</button>
       <button type="button" class="chip chip-btn ${state.inputMode === "piano" ? "is-on" : ""}" data-input="piano">Клавиши</button>
-      ${sym ? `<span class="chip chip-accent">${sym}</span>` : `<span class="chip">ещё не распознано</span>`}
       ${state.slots.length ? `<span class="chip">${state.slots.length} в ходе</span>` : ""}
     </div>
-    ${reason ? `<p class="detect-reason">${reason}</p>` : ""}
+    ${
+      altChips
+        ? `<div class="chip-row detect-alts" aria-label="Варианты аккорда">${altChips}</div>
+           <p class="detect-reason">${reason}${state.detectHits.length > 1 ? " · можно выбрать другой вариант" : ""}</p>`
+        : `<p class="detect-reason">ещё не распознано</p>`
+    }
     ${state.inputMode === "guitar" ? renderGuitarBoard() : renderPianoBoard()}
     ${renderVoicingStrip(sym, list)}
     <div class="actions sticky-actions">
@@ -233,6 +244,15 @@ function renderFret() {
   stage.querySelectorAll("[data-input]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.inputMode = btn.dataset.input;
+      state.selectedVoicingId = null;
+      renderFret();
+    });
+  });
+  stage.querySelectorAll("[data-pick-detect]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const symPick = btn.dataset.pickDetect;
+      const hit = (state.detectHits || []).find((h) => h.symbol === symPick);
+      state.detected = hit || { symbol: symPick, reason: "выбор", score: 0 };
       state.selectedVoicingId = null;
       renderFret();
     });
