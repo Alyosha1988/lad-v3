@@ -39,6 +39,31 @@ function emptyFrets() {
   return [-1, -1, -1, -1, -1, -1];
 }
 
+function audioApi() {
+  return typeof window !== "undefined" ? window.LadAudio || null : null;
+}
+
+/** Весь текущий захват на грифе. */
+function playGuitarGrip() {
+  const api = audioApi();
+  if (!api?.playVoicing) return;
+  const sounding = state.frets.filter((f) => f != null && f >= 0);
+  if (!sounding.length) return;
+  api.unlockAudio?.();
+  api.playVoicing(state.frets.slice(), {
+    duration: 0.85,
+    gain: 0.95,
+    waitMs: 80,
+  });
+}
+
+function playPianoKeys(midis) {
+  const api = audioApi();
+  if (!api?.playMidiNotes || !midis?.length) return;
+  api.unlockAudio?.();
+  api.playMidiNotes(midis.map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n)));
+}
+
 function setScreen(name) {
   state.screen = name;
   document.querySelectorAll(".tab").forEach((t) => {
@@ -126,6 +151,7 @@ function renderGuitarBoard() {
       </div>
       <div class="fb-board" id="fbBoard">${cells}</div>
       <div class="fb-actions">
+        <button type="button" class="btn btn-ghost" id="fbHear">Послушать захват</button>
         <button type="button" class="btn btn-ghost" id="fbClear">Сбросить гриф</button>
       </div>
     </div>`;
@@ -154,6 +180,7 @@ function renderPianoBoard() {
         <div class="piano-blacks">${blacks}</div>
       </div>
       <div class="fb-actions">
+        <button type="button" class="btn btn-ghost" id="fbHear">Послушать аккорд</button>
         <button type="button" class="btn btn-ghost" id="pianoClear">Сбросить клавиши</button>
       </div>
     </div>`;
@@ -263,7 +290,9 @@ function renderFret() {
       const s = +btn.dataset.fretOpen;
       const cur = state.frets[s];
       // cycle: mute → open → mute
-      state.frets[s] = cur === 0 ? -1 : 0;
+      const next = cur === 0 ? -1 : 0;
+      state.frets[s] = next;
+      if (next === 0) playGuitarGrip();
       renderFret();
     });
   });
@@ -271,7 +300,9 @@ function renderFret() {
     btn.addEventListener("click", () => {
       const s = +btn.dataset.string;
       const f = +btn.dataset.fret;
-      state.frets[s] = state.frets[s] === f ? -1 : f;
+      const turningOff = state.frets[s] === f;
+      state.frets[s] = turningOff ? -1 : f;
+      if (!turningOff) playGuitarGrip();
       renderFret();
     });
   });
@@ -291,15 +322,23 @@ function renderFret() {
     btn.addEventListener("click", () => {
       const m = +btn.dataset.midi;
       const i = state.piano.indexOf(m);
-      if (i >= 0) state.piano.splice(i, 1);
-      else state.piano.push(m);
-      state.piano.sort((a, b) => a - b);
+      if (i >= 0) {
+        state.piano.splice(i, 1);
+      } else {
+        state.piano.push(m);
+        state.piano.sort((a, b) => a - b);
+        playPianoKeys(state.piano.slice());
+      }
       renderFret();
     });
   });
   document.getElementById("pianoClear")?.addEventListener("click", () => {
     state.piano = [];
     renderFret();
+  });
+  document.getElementById("fbHear")?.addEventListener("click", () => {
+    if (state.inputMode === "guitar") playGuitarGrip();
+    else playPianoKeys(state.piano.slice());
   });
   stage.querySelectorAll("[data-pick-voicing]").forEach((btn) => {
     btn.addEventListener("click", () => {
