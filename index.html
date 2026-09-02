@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <meta name="theme-color" content="#0b0a09" />
+  <title>Лад — Рифф</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=20260902riff" />
+</head>
+<body>
+  <div class="paper" aria-hidden="true"></div>
+
+  <div class="shell">
+    <header class="topbar">
+      <button type="button" class="icon-btn" id="btnBack" aria-label="Назад" hidden>←</button>
+      <div class="brand-wrap">
+        <p class="brand">Лад</p>
+        <p class="brand-tag">рифф · от захвата к ходу</p>
+      </div>
+      <div class="instrument-bar" role="group" aria-label="Звук">
+        <button type="button" class="instrument-btn" data-instrument="acoustic" aria-label="Акустическая гитара" aria-pressed="false">
+          <img src="icons/acoustic.png" alt="" width="40" height="40" />
+        </button>
+        <button type="button" class="instrument-btn" data-instrument="distortion" aria-label="Дисторшн" aria-pressed="false">
+          <img src="icons/distortion.png" alt="" width="40" height="40" />
+        </button>
+        <button type="button" class="instrument-btn" data-instrument="piano" aria-label="Фортепиано" aria-pressed="false">
+          <img src="icons/piano.png" alt="" width="40" height="40" />
+        </button>
+      </div>
+    </header>
+
+    <main class="stage" id="stage" aria-live="polite"></main>
+
+    <nav class="tabbar" aria-label="Разделы">
+      <button type="button" class="tab is-active" data-nav="fret">
+        <span class="tab-ico" aria-hidden="true">♮</span>
+        Гриф
+      </button>
+      <button type="button" class="tab" data-nav="path">
+        <span class="tab-ico" aria-hidden="true">≡</span>
+        Ход
+      </button>
+      <button type="button" class="tab" data-nav="develop">
+        <span class="tab-ico" aria-hidden="true">✦</span>
+        Развитие
+      </button>
+    </nav>
+  </div>
+
+  <script src="voicings.js?v=20260902riff"></script>
+  <script src="fingering.js?v=20260902riff"></script>
+  <script src="detect.js?v=20260902riff"></script>
+  <script src="audio.js?v=20260902riff"></script>
+  <script src="app.js?v=20260902riff"></script>
+</body>
+</html>
