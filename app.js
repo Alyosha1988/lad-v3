@@ -331,6 +331,7 @@ function renderVoicingStrip(symbol, list) {
 }
 
 function renderFret() {
+  const prevStripScroll = stage.querySelector(".voicing-strip")?.scrollLeft || 0;
   detectNow();
   const list = currentVoicings();
   state.selectedVoicingId = resolveSelectedVoicingId(list);
@@ -484,6 +485,9 @@ function renderFret() {
   });
   document.getElementById("toPath")?.addEventListener("click", () => setScreen("path"));
   document.getElementById("toDevelop")?.addEventListener("click", () => setScreen("develop"));
+
+  const strip = stage.querySelector(".voicing-strip");
+  if (strip && prevStripScroll) strip.scrollLeft = prevStripScroll;
 }
 
 /* ---------- Path ---------- */
