@@ -14,7 +14,10 @@ const state = {
   baseFret: 1,
   detected: null, // { symbol, score, reason }
   detectHits: [],
+  preferredSymbol: null,
+  preferredReason: null,
   selectedVoicingId: null,
+  voicingPinned: false,
   /** @type {{ id, symbol, voicing }[]} */
   slots: [],
   dragFrom: null,
@@ -80,10 +83,55 @@ function render() {
   else if (state.screen === "develop") renderDevelop();
 }
 
+function fretsEqual(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((f, i) => Number(f) === Number(b[i]));
+}
+
+function midisEqual(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  const aa = a.map(Number).slice().sort((x, y) => x - y);
+  const bb = b.map(Number).slice().sort((x, y) => x - y);
+  return aa.every((n, i) => n === bb[i]);
+}
+
+/** Захват с грифа / клавиш — чтобы в ход уходило то, что зажали. */
+function boardGripVoicing(symbol) {
+  if (!symbol) return null;
+  if (state.inputMode === "guitar") {
+    const frets = state.frets.slice();
+    if (!frets.some((f) => f >= 0)) return null;
+    const played = frets.filter((f) => f > 0);
+    const baseFret =
+      typeof computeBaseFret === "function"
+        ? computeBaseFret(frets)
+        : played.length
+          ? Math.min(...played)
+          : 1;
+    const sig = typeof fretsSignature === "function" ? fretsSignature(frets) : frets.join(",");
+    return {
+      id: `board-gtr-${sig}`,
+      instrument: "guitar",
+      name: "Ваш захват",
+      frets,
+      baseFret,
+      tags: ["board"],
+      movable: false,
+    };
+  }
+  if (state.piano.length) {
+    return {
+      id: `board-piano-${state.piano.join(".")}`,
+      instrument: "piano",
+      name: "Ваши клавиши",
+      midis: state.piano.slice(),
+      tags: ["board"],
+    };
+  }
+  return null;
+}
+
 function detectNow() {
-  state.detected = null;
-  state.detectHits = [];
-  state.selectedVoicingId = null;
   let hits = [];
   if (state.inputMode === "guitar") {
     if (typeof identifyFromFrets === "function") hits = identifyFromFrets(state.frets) || [];
@@ -91,25 +139,70 @@ function detectNow() {
     hits = identifyFromMidis(state.piano) || [];
   }
   state.detectHits = hits;
-  state.detected = hits[0] || null;
+
+  const preferred = state.preferredSymbol;
+  const prevSym = state.detected?.symbol;
+  if (preferred) {
+    const hit = hits.find((h) => h.symbol === preferred);
+    state.detected = hit || { symbol: preferred, reason: state.preferredReason || "выбор", score: 0 };
+  } else if (prevSym && hits.some((h) => h.symbol === prevSym)) {
+    state.detected = hits.find((h) => h.symbol === prevSym) || hits[0] || null;
+  } else {
+    state.detected = hits[0] || null;
+  }
 }
 
 function currentVoicings() {
   const sym = state.detected?.symbol;
   if (!sym || typeof getAllVoicings !== "function") return [];
   const instrument = state.inputMode === "piano" ? "piano" : "guitar";
-  return getAllVoicings(sym, { instrument });
+  const list = getAllVoicings(sym, { instrument }).slice();
+  const grip = boardGripVoicing(sym);
+  if (!grip) return list;
+  const exact = list.find((v) =>
+    grip.frets ? fretsEqual(v.frets, grip.frets) : midisEqual(v.midis, grip.midis)
+  );
+  if (exact) return list;
+  return [grip, ...list];
+}
+
+function resolveSelectedVoicingId(list) {
+  if (!list.length) return null;
+  if (state.voicingPinned && state.selectedVoicingId) {
+    const pinned = list.find((v) => v.id === state.selectedVoicingId);
+    if (pinned) return pinned.id;
+  }
+  if (state.inputMode === "guitar") {
+    const hit = list.find((v) => v.frets && fretsEqual(v.frets, state.frets));
+    if (hit) return hit.id;
+  } else if (state.piano.length) {
+    const hit = list.find((v) => v.midis && midisEqual(v.midis, state.piano));
+    if (hit) return hit.id;
+  }
+  const board = list.find((v) => (v.tags || []).includes("board"));
+  if (board) return board.id;
+  if (state.selectedVoicingId && list.some((v) => v.id === state.selectedVoicingId)) {
+    return state.selectedVoicingId;
+  }
+  return list[0].id;
 }
 
 function selectedVoicing() {
   const list = currentVoicings();
   if (!list.length) return null;
-  return list.find((v) => v.id === state.selectedVoicingId) || list[0];
+  const id = resolveSelectedVoicingId(list);
+  return list.find((v) => v.id === id) || list[0];
 }
 
 function addSlot(symbol, voicing, opts = {}) {
-  const v = voicing ? { ...voicing } : selectedVoicing();
-  if (!symbol || !v) return;
+  const src = voicing || selectedVoicing();
+  if (!symbol || !src) return;
+  const v = {
+    ...src,
+    frets: src.frets ? src.frets.slice() : undefined,
+    midis: src.midis ? src.midis.slice() : undefined,
+    tags: src.tags ? [...src.tags] : undefined,
+  };
   const slot = { id: uid(), symbol, voicing: v };
   if (opts.duplicateOf != null) {
     state.slots.splice(opts.duplicateOf + 1, 0, slot);
@@ -202,7 +295,7 @@ function renderVoicingStrip(symbol, list) {
   }
   const cards = list
     .map((v) => {
-      const selected = (state.selectedVoicingId || list[0].id) === v.id;
+      const selected = state.selectedVoicingId === v.id || (!state.selectedVoicingId && list[0]?.id === v.id);
       let diag = "";
       if (v.frets && typeof renderChordSvg === "function") {
         diag = renderChordSvg(symbol, v, { width: 92, height: 120 });
@@ -232,7 +325,7 @@ function renderVoicingStrip(symbol, list) {
         <h2 class="h2">${symbol}</h2>
         <span class="chip">${list.length} постановок</span>
       </div>
-      <p class="hand-note">Все разумные формы из базы · выберите и добавьте в ход</p>
+      <p class="hand-note">Все разумные формы из базы · нажмите карточку и добавьте в ход</p>
       <div class="voicing-strip">${cards}</div>
     </div>`;
 }
@@ -240,7 +333,7 @@ function renderVoicingStrip(symbol, list) {
 function renderFret() {
   detectNow();
   const list = currentVoicings();
-  if (list.length && !state.selectedVoicingId) state.selectedVoicingId = list[0].id;
+  state.selectedVoicingId = resolveSelectedVoicingId(list);
   const sym = state.detected?.symbol || "";
   const reason = state.detected?.reason || "";
   const altChips = (state.detectHits || [])
@@ -279,14 +372,17 @@ function renderFret() {
     btn.addEventListener("click", () => {
       state.inputMode = btn.dataset.input;
       state.selectedVoicingId = null;
+      state.voicingPinned = false;
+      state.preferredSymbol = null;
       renderFret();
     });
   });
   stage.querySelectorAll("[data-pick-detect]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const symPick = btn.dataset.pickDetect;
-      const hit = (state.detectHits || []).find((h) => h.symbol === symPick);
-      state.detected = hit || { symbol: symPick, reason: "выбор", score: 0 };
+      state.preferredSymbol = symPick;
+      state.preferredReason = "выбор";
+      state.voicingPinned = false;
       state.selectedVoicingId = null;
       renderFret();
     });
@@ -299,6 +395,8 @@ function renderFret() {
       // cycle: mute → open → mute
       const next = cur === 0 ? -1 : 0;
       state.frets[s] = next;
+      state.voicingPinned = false;
+      state.preferredSymbol = null;
       if (next === 0) playGuitarGrip();
       renderFret();
     });
@@ -309,6 +407,8 @@ function renderFret() {
       const f = +btn.dataset.fret;
       const turningOff = state.frets[s] === f;
       state.frets[s] = turningOff ? -1 : f;
+      state.voicingPinned = false;
+      state.preferredSymbol = null;
       if (!turningOff) playGuitarGrip();
       renderFret();
     });
@@ -323,12 +423,18 @@ function renderFret() {
   });
   document.getElementById("fbClear")?.addEventListener("click", () => {
     state.frets = emptyFrets();
+    state.voicingPinned = false;
+    state.preferredSymbol = null;
+    state.detected = null;
+    state.selectedVoicingId = null;
     renderFret();
   });
   stage.querySelectorAll("[data-midi]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const m = +btn.dataset.midi;
       const i = state.piano.indexOf(m);
+      state.voicingPinned = false;
+      state.preferredSymbol = null;
       if (i >= 0) {
         state.piano.splice(i, 1);
       } else {
@@ -341,16 +447,33 @@ function renderFret() {
   });
   document.getElementById("pianoClear")?.addEventListener("click", () => {
     state.piano = [];
+    state.voicingPinned = false;
+    state.preferredSymbol = null;
+    state.detected = null;
+    state.selectedVoicingId = null;
     renderFret();
   });
   document.getElementById("fbHear")?.addEventListener("click", () => {
     if (state.inputMode === "guitar") playGuitarGrip();
     else playPianoKeys(state.piano.slice());
   });
+
+  const pinVoicing = (id) => {
+    if (!id) return;
+    state.selectedVoicingId = id;
+    state.voicingPinned = true;
+    renderFret();
+  };
   stage.querySelectorAll("[data-pick-voicing]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.selectedVoicingId = btn.dataset.pickVoicing;
-      renderFret();
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      pinVoicing(btn.dataset.pickVoicing);
+    });
+  });
+  stage.querySelectorAll("[data-voicing-id]").forEach((card) => {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("[data-play-frets], [data-play-notes], [data-play-chord]")) return;
+      pinVoicing(card.dataset.voicingId);
     });
   });
   document.getElementById("addToPath")?.addEventListener("click", () => {
@@ -700,7 +823,9 @@ function renderDevelop() {
   });
   stage.querySelectorAll("[data-idea-focus]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.detected = { symbol: btn.dataset.ideaFocus, reason: "из идей развития", score: 100 };
+      state.preferredSymbol = btn.dataset.ideaFocus;
+      state.preferredReason = "из идей развития";
+      state.voicingPinned = false;
       state.selectedVoicingId = null;
       setScreen("fret");
     });

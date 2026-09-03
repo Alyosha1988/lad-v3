@@ -1927,6 +1927,8 @@ button[data-open-degrees].btn-glow {
   border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(12, 9, 7, 0.55);
+  cursor: pointer;
+  touch-action: manipulation;
 }
 .voicing-card.is-selected {
   border-color: rgba(240, 163, 90, 0.5);

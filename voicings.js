@@ -410,6 +410,10 @@ function fretsSignature(frets) {
   return frets.join(",");
 }
 
+function fretsIdPart(frets) {
+  return frets.map((f) => (f < 0 || f == null || Number.isNaN(f) ? "x" : String(f))).join("-");
+}
+
 function computeBaseFret(frets) {
   const played = frets.filter((f) => f > 0);
   if (!played.length) return 1;
@@ -595,7 +599,7 @@ function getPianoVoicings(symbol) {
     name: v.name,
     midis: v.midis,
     tags: v.tags,
-    id: `piano-${i}`,
+    id: `piano-${symbol}-${i}-${(v.midis || []).join("-")}`,
   }));
 }
 
@@ -608,7 +612,7 @@ function getGuitarVoicings(symbol) {
   const movable = collectMovableVoicings(root, quality);
   return dedupeGuitar([...open, ...movable]).map((v, i) => ({
     ...v,
-    id: `gtr-${i}-${fretsSignature(v.frets)}`,
+    id: `gtr-${symbol}-${i}-${fretsIdPart(v.frets)}`,
   }));
 }
 
@@ -683,6 +687,8 @@ if (typeof window !== "undefined") {
   window.OPEN_VOICINGS = OPEN_VOICINGS;
   window.getVoicings = getVoicings;
   window.getAllVoicings = getAllVoicings;
+  window.fretsSignature = fretsSignature;
+  window.computeBaseFret = computeBaseFret;
   window.getGuitarVoicings = getGuitarVoicings;
   window.getPianoVoicings = getPianoVoicings;
   window.listKnownQualities = listKnownQualities;
