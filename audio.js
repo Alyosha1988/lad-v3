@@ -46,6 +46,7 @@ const loadQueue = [];
 const activeJobs = new Map();
 let activeLoads = 0;
 let playGeneration = 0;
+let loopGeneration = 0;
 let melodyGeneration = 0;
 let warmTimer = null;
 
@@ -516,6 +517,101 @@ function playVoicing(frets, opts = {}) {
   return true;
 }
 
+function scheduleVoicing(frets, when, opts = {}) {
+  const ctx = unlockAudio();
+  if (!ctx) return false;
+  const notes = fretsToNotes(frets);
+  if (!notes.length) return false;
+
+  const instrument = opts.instrument || currentInstrument;
+  const style = instrumentPlayStyle(instrument);
+  const reverse = !!opts.upstroke;
+  const ordered = reverse ? notes.slice().reverse() : notes;
+  const strum = opts.strumMs ?? (reverse ? Math.max(0.012, style.strum * 0.7) : style.strum);
+  const baseGain = (opts.gain ?? style.gain) * (reverse ? 0.82 : 1);
+  const duration = opts.duration ?? Math.min(0.55, style.duration * 0.28);
+  const dest = destinationFor(instrument, ctx);
+
+  const jobs = ordered.map((n, i) => loadSample(instrument, n.midi, 100 - i));
+  settleWithTimeout(jobs, opts.waitMs ?? 40).then((buffers) => {
+    if (opts.loopGen != null && opts.loopGen !== loopGeneration) return;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    const startAt = Math.max(when, ctx.currentTime + 0.01);
+    ordered.forEach((n, i) => {
+      const t = startAt + i * strum;
+      const g = baseGain * (instrument === "piano" ? 1 : n.string <= 2 ? 1.05 : 0.88);
+      const buf = buffers[i];
+      if (buf) playBuffer(ctx, buf, t, g, dest, duration, style);
+      else synthFallback(ctx, n.freq, t, duration * 0.75, g * 0.4, dest, instrument);
+    });
+  });
+  return true;
+}
+
+function scheduleMidiChord(midis, when, opts = {}) {
+  const ctx = unlockAudio();
+  if (!ctx || !midis?.length) return false;
+  const instrument = opts.instrument || currentInstrument;
+  const style = instrumentPlayStyle(instrument);
+  const dest = destinationFor(instrument, ctx);
+  const baseGain = (opts.gain ?? style.gain) * (opts.upstroke ? 0.85 : 1);
+  const duration = opts.duration ?? Math.min(0.55, style.duration * 0.28);
+  const jobs = midis.map((m, i) => loadSample(instrument, m, 100 - i));
+  settleWithTimeout(jobs, opts.waitMs ?? 40).then((buffers) => {
+    if (opts.loopGen != null && opts.loopGen !== loopGeneration) return;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    const startAt = Math.max(when, ctx.currentTime + 0.01);
+    midis.forEach((m, i) => {
+      const t = startAt + i * (instrument === "piano" ? 0.008 : 0.02);
+      const buf = buffers[i];
+      const g = baseGain * 0.95;
+      if (buf) playBuffer(ctx, buf, t, g, dest, duration, style);
+      else synthFallback(ctx, midiToFreq(m), t, duration * 0.75, g * 0.4, dest, instrument);
+    });
+  });
+  return true;
+}
+
+function scheduleMetronomeClick(when, opts = {}) {
+  const ctx = unlockAudio();
+  if (!ctx) return false;
+  if (opts.loopGen != null && opts.loopGen !== loopGeneration) return false;
+  const t = Math.max(when, ctx.currentTime + 0.005);
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  const accent = !!opts.accent;
+  osc.type = "sine";
+  osc.frequency.value = accent ? 1320 : 880;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(accent ? 0.22 : 0.12, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+  osc.connect(g);
+  g.connect(getMasterBus(ctx));
+  osc.start(t);
+  osc.stop(t + 0.07);
+  return true;
+}
+
+function beginLoopGeneration() {
+  loopGeneration += 1;
+  return loopGeneration;
+}
+
+function endLoopGeneration() {
+  loopGeneration += 1;
+  return loopGeneration;
+}
+
+function prefetchVoicingSamples(voicing) {
+  if (!voicing) return;
+  const instrument = currentInstrument;
+  if (voicing.frets) {
+    fretsToNotes(voicing.frets).forEach((n, i) => loadSample(instrument, n.midi, 70 - i));
+  } else if (voicing.midis?.length) {
+    voicing.midis.forEach((m, i) => loadSample(instrument, m, 70 - i));
+  }
+}
+
 function playChord(symbol) {
   if (typeof getVoicings !== "function") return false;
   const voicings = getVoicings(symbol);
@@ -696,6 +792,12 @@ const LadAudioAPI = {
   playMidiNotes,
   playMelody,
   prefetchMelody,
+  scheduleVoicing,
+  scheduleMidiChord,
+  scheduleMetronomeClick,
+  beginLoopGeneration,
+  endLoopGeneration,
+  prefetchVoicingSamples,
   fretsToNotes,
   parseFrets,
   midiToFreq,

@@ -1964,6 +1964,10 @@ button[data-open-degrees].btn-glow {
   background: rgba(16, 12, 10, 0.7);
 }
 .slot-card.is-drag-over { border-color: var(--accent); }
+.slot-card.is-looping {
+  border-color: rgba(240, 163, 90, 0.55);
+  box-shadow: 0 0 18px rgba(240, 163, 90, 0.18);
+}
 .slot-card__top {
   display: flex;
   gap: 0.45rem;

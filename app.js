@@ -23,6 +23,11 @@ const state = {
   dragFrom: null,
   pdfPreview: false,
   soloBoxesModeId: null,
+  loop: {
+    tempo: 90,
+    patternId: "folk",
+    metronome: true,
+  },
 };
 
 const stage = document.getElementById("stage");
@@ -70,6 +75,7 @@ function playPianoKeys(midis) {
 }
 
 function setScreen(name) {
+  if (state.screen === "path" && name !== "path") stopRiffLoopUi();
   state.screen = name;
   document.querySelectorAll(".tab").forEach((t) => {
     t.classList.toggle("is-active", t.dataset.nav === name || (name === "fret" && t.dataset.nav === "fret"));
@@ -344,6 +350,115 @@ function bindPdfPreviewActions() {
     state.pdfPreview = false;
     render();
   });
+}
+
+function stopRiffLoopUi() {
+  if (typeof LadRiffLoop !== "undefined") LadRiffLoop.stopLoop({ silent: true });
+  document.querySelectorAll(".slot-card.is-looping").forEach((el) => el.classList.remove("is-looping"));
+  const btn = document.getElementById("loopToggle");
+  if (btn) {
+    btn.textContent = "▶ Цикл";
+    btn.classList.remove("is-on");
+  }
+}
+
+function highlightLoopSlot(idx) {
+  document.querySelectorAll(".slot-card").forEach((el, i) => {
+    el.classList.toggle("is-looping", i === idx);
+  });
+}
+
+function renderLoopPanel() {
+  const patterns = typeof LadRiffLoop !== "undefined" ? LadRiffLoop.listPatterns() : [];
+  const playing = typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying();
+  const opts = patterns
+    .map(
+      (p) =>
+        `<option value="${p.id}" ${state.loop.patternId === p.id ? "selected" : ""}>${p.label} · ${p.hint}</option>`
+    )
+    .join("");
+  return `
+    <section class="loop-panel" id="loopPanel" aria-label="Цикл риффа">
+      <div class="loop-panel__head">
+        <p class="kicker">Цикл</p>
+        <p class="hand-note">1 такт на аккорд · бой · метроном · по кругу</p>
+      </div>
+      <div class="loop-panel__row">
+        <label class="loop-field">
+          <span>Темп</span>
+          <input type="range" id="loopTempo" min="60" max="140" step="1" value="${state.loop.tempo}" />
+          <strong id="loopTempoVal">${state.loop.tempo}</strong>
+        </label>
+      </div>
+      <div class="loop-panel__row">
+        <label class="loop-field">
+          <span>Бой</span>
+          <select id="loopPattern" class="solo-slot-select" aria-label="Паттерн боя">${opts}</select>
+        </label>
+      </div>
+      <div class="loop-panel__row loop-panel__toggles">
+        <label class="loop-toggle">
+          <input type="checkbox" id="loopMetronome" ${state.loop.metronome ? "checked" : ""} />
+          <span>Метроном</span>
+        </label>
+        <span class="chip">1 такт / аккорд</span>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn-glow ${playing ? "is-on" : ""}" id="loopToggle">
+          ${playing ? "■ Стоп" : "▶ Цикл"}
+        </button>
+      </div>
+    </section>`;
+}
+
+function bindLoopPanel() {
+  const tempo = document.getElementById("loopTempo");
+  const tempoVal = document.getElementById("loopTempoVal");
+  tempo?.addEventListener("input", () => {
+    state.loop.tempo = +tempo.value;
+    if (tempoVal) tempoVal.textContent = String(state.loop.tempo);
+    if (typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying()) startRiffLoop();
+  });
+  document.getElementById("loopPattern")?.addEventListener("change", (e) => {
+    state.loop.patternId = e.target.value;
+    if (typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying()) startRiffLoop();
+  });
+  document.getElementById("loopMetronome")?.addEventListener("change", (e) => {
+    state.loop.metronome = !!e.target.checked;
+    if (typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying()) startRiffLoop();
+  });
+  document.getElementById("loopToggle")?.addEventListener("click", () => {
+    if (typeof LadRiffLoop === "undefined") {
+      flash("Движок цикла не загружен.");
+      return;
+    }
+    if (LadRiffLoop.isPlaying()) stopRiffLoopUi();
+    else startRiffLoop();
+  });
+}
+
+function startRiffLoop() {
+  if (typeof LadRiffLoop === "undefined" || !state.slots.length) return;
+  audioApi()?.unlockAudio?.();
+  const ok = LadRiffLoop.startLoop({
+    tempo: state.loop.tempo,
+    patternId: state.loop.patternId,
+    metronome: state.loop.metronome,
+    getSlots: () => state.slots,
+    onSlot: highlightLoopSlot,
+    onStop: () => {
+      const btn = document.getElementById("loopToggle");
+      if (btn) {
+        btn.textContent = "▶ Цикл";
+        btn.classList.remove("is-on");
+      }
+    },
+  });
+  const btn = document.getElementById("loopToggle");
+  if (btn && ok) {
+    btn.textContent = "■ Стоп";
+    btn.classList.add("is-on");
+  }
 }
 
 /* ---------- Fret / piano input ---------- */
@@ -676,6 +791,7 @@ function renderPath() {
     <p class="kicker">Ход</p>
     <h1 class="h1">${route}</h1>
     <p class="hand-note">Переставляйте, дублируйте постановки · тяните карточку</p>
+    ${renderLoopPanel()}
     <div class="slot-list" id="slotList">${cards}</div>
     <div class="actions sticky-actions">
       <button type="button" class="btn btn-glow" id="toSolo">К соло</button>
@@ -703,10 +819,12 @@ function renderPath() {
     }
   });
   document.getElementById("clearPath").addEventListener("click", () => {
+    stopRiffLoopUi();
     state.slots = [];
     setScreen("fret");
   });
 
+  bindLoopPanel();
   stage.querySelectorAll("[data-dup]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const i = +btn.dataset.dup;
@@ -738,6 +856,12 @@ function renderPath() {
   stage.querySelectorAll("[data-del]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.slots.splice(+btn.dataset.del, 1);
+      if (!state.slots.length) {
+        stopRiffLoopUi();
+        setScreen("fret");
+        return;
+      }
+      if (typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying()) startRiffLoop();
       renderPath();
     });
   });
