@@ -7,7 +7,7 @@ const LAD_PLUS_KEY = "lad-plus";
 const SONG_KEY = "lad-riff-v3";
 
 const state = {
-  screen: "fret", // fret | path | develop
+  screen: "fret", // fret | path | develop | solo
   inputMode: "guitar", // guitar | piano
   frets: [-1, -1, -1, -1, -1, -1],
   piano: [],
@@ -21,6 +21,8 @@ const state = {
   /** @type {{ id, symbol, voicing }[]} */
   slots: [],
   dragFrom: null,
+  pdfPreview: false,
+  soloBoxesModeId: null,
 };
 
 const stage = document.getElementById("stage");
@@ -81,6 +83,7 @@ function render() {
   if (state.screen === "fret") renderFret();
   else if (state.screen === "path") renderPath();
   else if (state.screen === "develop") renderDevelop();
+  else if (state.screen === "solo") renderSolo();
 }
 
 function fretsEqual(a, b) {
@@ -213,6 +216,134 @@ function addSlot(symbol, voicing, opts = {}) {
 
 function pathSymbols() {
   return state.slots.map((s) => s.symbol);
+}
+
+function inferRiffMood(symbol) {
+  const raw = String(symbol || "");
+  const quality = raw.replace(/^[A-G][b#]?/i, "");
+  if (/^m(?!aj)/i.test(quality)) return "dark";
+  if (/7/.test(quality)) return "pulse";
+  return "bright";
+}
+
+function riffSoloItem() {
+  const path = pathSymbols();
+  if (!path.length) return null;
+  return {
+    path,
+    start: path[0],
+    mood: inferRiffMood(path[0]),
+  };
+}
+
+function bindMelodyPlayButtons(root) {
+  (root || document).querySelectorAll("[data-play-melody]").forEach((btn) => {
+    if (btn.__ladMelodyBound) return;
+    btn.__ladMelodyBound = true;
+    let last = 0;
+    const play = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const now = Date.now();
+      if (now - last < 320) return;
+      last = now;
+      const raw = btn.dataset.playMelody;
+      if (!raw || typeof window.LadAudio === "undefined") return;
+      const midis = raw
+        .split(",")
+        .map((n) => parseInt(n, 10))
+        .filter((n) => Number.isFinite(n));
+      if (!midis.length) return;
+      LadAudio.unlockAudio?.();
+      LadAudio.playMelody?.(midis);
+    };
+    btn.addEventListener("pointerup", play);
+    btn.addEventListener("click", play);
+  });
+}
+
+function bindVoiceDelegation() {
+  if (document.__ladVoiceBound) return;
+  document.__ladVoiceBound = true;
+  document.addEventListener(
+    "click",
+    (e) => {
+      const btn = e.target.closest("[data-set-voice], [data-voice]");
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof LadTheory === "undefined") return;
+      const voice = btn.dataset.setVoice || btn.dataset.voice;
+      if (voice !== "plain" && voice !== "pro") return;
+      LadTheory.setVoice(voice);
+      const screen = state.screen;
+      requestAnimationFrame(() => {
+        if (state.screen !== screen) return;
+        render();
+      });
+    },
+    true
+  );
+}
+
+function exportRiffPdfOrPreview() {
+  if (!state.slots.length) return;
+  if (hasPlus() && typeof exportRiffToPdf === "function") {
+    exportRiffToPdf();
+    return;
+  }
+  state.pdfPreview = true;
+  if (state.screen === "path") renderPath();
+  else if (state.screen === "develop") renderDevelop();
+  else if (state.screen === "solo") renderSolo();
+  document.getElementById("pdfPreview")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderPdfPreviewBlock() {
+  const path = pathSymbols();
+  if (!path.length || !state.pdfPreview) return "";
+  const item = riffSoloItem();
+  const pass =
+    typeof LadTheory !== "undefined"
+      ? LadTheory.passportForPdf(item, { moodId: item.mood, start: item.start })
+      : { degrees: "", functions: "", modeLine: "", summary: "" };
+  const plus = hasPlus();
+  const names = state.slots.map((s) => s.voicing?.name || "постановка").join(" · ");
+  return `
+    <div class="pdf-preview-frame" id="pdfPreview">
+      <h3>Лист риффа — вид как после оплаты</h3>
+      <p>Лад · ход · аппликатуры выбранных хватов</p>
+      <h3>Ход</h3>
+      <p><strong>${path.join(" → ")}</strong></p>
+      <p>Ступени: ${pass.degrees || "—"}</p>
+      <p>${pass.functions || ""}</p>
+      <p>${pass.modeLine || ""}</p>
+      <p>${pass.summary || ""}</p>
+      <p>Хваты: ${names}</p>
+      <p>На листе — те постановки, которые вы добавили в ход, не первая из базы.</p>
+      <div class="pdf-preview-actions actions">
+        ${
+          plus
+            ? `<button type="button" class="btn btn-glow" id="exportPdfReal">Скачать PDF</button>`
+            : `<button type="button" class="btn btn-glow" id="needPlusPdf">Скачивание — в Лад+</button>`
+        }
+        <button type="button" class="btn btn-ghost" id="closePdfPreview">Закрыть предпросмотр</button>
+      </div>
+    </div>`;
+}
+
+function bindPdfPreviewActions() {
+  document.getElementById("exportPdfReal")?.addEventListener("click", () => {
+    if (hasPlus() && typeof exportRiffToPdf === "function") exportRiffToPdf();
+    else flash("Лад+ нужен для PDF. Включите в Песне (тот же ключ на устройстве).");
+  });
+  document.getElementById("needPlusPdf")?.addEventListener("click", () => {
+    flash("Лад+ нужен для PDF. Включите в Песне — ключ общий на этом устройстве.");
+  });
+  document.getElementById("closePdfPreview")?.addEventListener("click", () => {
+    state.pdfPreview = false;
+    render();
+  });
 }
 
 /* ---------- Fret / piano input ---------- */
@@ -525,6 +656,13 @@ function renderPath() {
           </div>
           ${diag}
           <div class="slot-card__actions">
+            ${
+              slot.voicing?.frets
+                ? `<button type="button" class="btn btn-ghost btn-tiny" data-play-frets="${slot.voicing.frets.join(",")}">▶</button>`
+                : slot.voicing?.midis
+                  ? `<button type="button" class="btn btn-ghost btn-tiny" data-play-notes="${slot.voicing.midis.join(",")}">▶</button>`
+                  : ""
+            }
             <button type="button" class="btn btn-ghost btn-tiny" data-dup="${idx}">Дублировать</button>
             <button type="button" class="btn btn-ghost btn-tiny" data-up="${idx}" ${idx === 0 ? "disabled" : ""}>↑</button>
             <button type="button" class="btn btn-ghost btn-tiny" data-down="${idx}" ${idx === state.slots.length - 1 ? "disabled" : ""}>↓</button>
@@ -540,15 +678,20 @@ function renderPath() {
     <p class="hand-note">Переставляйте, дублируйте постановки · тяните карточку</p>
     <div class="slot-list" id="slotList">${cards}</div>
     <div class="actions sticky-actions">
-      <button type="button" class="btn btn-glow" id="toDevelop2">Развитие идей</button>
+      <button type="button" class="btn btn-glow" id="toSolo">К соло</button>
+      <button type="button" class="btn btn-glow" id="exportPdf">${hasPlus() ? "Выгрузить PDF" : "Показать лист PDF"}</button>
+      <button type="button" class="btn btn-primary" id="toDevelop2">Развитие идей</button>
       <button type="button" class="btn btn-primary" id="backFret2">Ещё аккорд</button>
       <button type="button" class="btn btn-ghost" id="copyPath">Скопировать</button>
       <button type="button" class="btn btn-ghost" id="clearPath">Очистить</button>
     </div>
+    ${renderPdfPreviewBlock()}
     <p class="song-save-status" id="pathStatus" hidden></p>
   `;
 
   document.getElementById("toDevelop2").addEventListener("click", () => setScreen("develop"));
+  document.getElementById("toSolo").addEventListener("click", () => setScreen("solo"));
+  document.getElementById("exportPdf").addEventListener("click", () => exportRiffPdfOrPreview());
   document.getElementById("backFret2").addEventListener("click", () => setScreen("fret"));
   document.getElementById("copyPath").addEventListener("click", async () => {
     const text = pathSymbols().join(" → ");
@@ -623,10 +766,15 @@ function renderPath() {
       renderPath();
     });
   });
+
+  bindPdfPreviewActions();
 }
 
 function flash(text) {
-  const el = document.getElementById("pathStatus") || document.getElementById("devStatus");
+  const el =
+    document.getElementById("pathStatus") ||
+    document.getElementById("devStatus") ||
+    document.getElementById("soloStatus");
   if (!el) return;
   el.hidden = false;
   el.textContent = text;
@@ -772,17 +920,22 @@ function renderDevelop() {
     <div class="idea-list">${blocks || "<p class='hand-note'>Добавьте аккорд — появятся идеи.</p>"}</div>
     <div class="actions sticky-actions">
       <button type="button" class="btn btn-primary" id="backPath">К ходу</button>
+      <button type="button" class="btn btn-glow" id="toSolo2">К соло</button>
+      <button type="button" class="btn btn-glow" id="exportPdf2">${hasPlus() ? "Выгрузить PDF" : "Показать лист PDF"}</button>
       <button type="button" class="btn btn-ghost" id="backFret3">К грифу</button>
       ${
         hasPlus()
-          ? `<button type="button" class="btn btn-glow" id="saveRiff">Сохранить</button>`
-          : `<button type="button" class="btn btn-glow" id="needPlus">Сохранение — в Лад+</button>`
+          ? `<button type="button" class="btn btn-ghost" id="saveRiff">Сохранить</button>`
+          : `<button type="button" class="btn btn-ghost" id="needPlus">Сохранение — в Лад+</button>`
       }
     </div>
+    ${renderPdfPreviewBlock()}
     <p class="song-save-status" id="devStatus" hidden></p>
   `;
 
   document.getElementById("backPath").addEventListener("click", () => setScreen("path"));
+  document.getElementById("toSolo2")?.addEventListener("click", () => setScreen("solo"));
+  document.getElementById("exportPdf2")?.addEventListener("click", () => exportRiffPdfOrPreview());
   document.getElementById("backFret3").addEventListener("click", () => setScreen("fret"));
   document.getElementById("needPlus")?.addEventListener("click", () => {
     flash("Лад+ нужен только для сохранения и PDF. Включите в Песне или localStorage lad-plus=1.");
@@ -834,12 +987,134 @@ function renderDevelop() {
       setScreen("fret");
     });
   });
+  bindPdfPreviewActions();
+}
+
+/* ---------- Solo ---------- */
+
+function renderSolo() {
+  if (!state.slots.length) {
+    setScreen("fret");
+    return;
+  }
+  const plus = hasPlus();
+  const item = riffSoloItem();
+  const route = pathSymbols().join(" → ");
+  const voice = typeof LadTheory !== "undefined" ? LadTheory.getVoice() : "plain";
+  const voiceToggle = typeof LadTheory !== "undefined" ? LadTheory.renderVoiceToggleMini() : "";
+
+  if (!plus) {
+    stage.innerHTML = `
+      <p class="kicker">Соло</p>
+      <h1 class="h1">Лад над риффом</h1>
+      <p class="hand-note">${route}</p>
+      <section class="solo-suggest is-locked">
+        <h2 class="solo-suggest__title">Подберём лад для соло</h2>
+        <p class="hand-note">2–3 лада под ваш ход, боксы на грифе и прослушивание. Доступно в Лад+.</p>
+        <div class="actions">
+          <button type="button" class="btn btn-glow" id="needPlusSolo">Открыть в Лад+</button>
+          <button type="button" class="btn btn-ghost" id="soloBackPath">К ходу</button>
+        </div>
+      </section>
+      ${renderPdfPreviewBlock()}
+      <p class="song-save-status" id="soloStatus" hidden></p>`;
+    document.getElementById("needPlusSolo")?.addEventListener("click", () => {
+      flash("Лад+ общий с Песней. Включите там — соло и PDF откроются здесь же.");
+    });
+    document.getElementById("soloBackPath")?.addEventListener("click", () => setScreen("path"));
+    bindPdfPreviewActions();
+    return;
+  }
+
+  const suggestion =
+    item && typeof LadTheory !== "undefined" ? LadTheory.suggestSoloModes(item, { moodId: item.mood }) : null;
+  if (suggestion?.modes?.length && !suggestion.modes.some((m) => m.id === state.soloBoxesModeId)) {
+    state.soloBoxesModeId = null;
+  }
+
+  let modesHtml = "";
+  if (!suggestion?.modes?.length) {
+    modesHtml = `<p class="hand-note">Не удалось подобрать лад для этого хода. Добавьте ещё аккорд или смените центр.</p>`;
+  } else {
+    modesHtml = suggestion.modes
+      .map((mode, idx) => {
+        const title = LadTheory.soloModeTitle(mode, voice);
+        const why = LadTheory.soloModeWhy(mode, voice);
+        const notes = mode.notes.join(" · ");
+        const boxesOpen = state.soloBoxesModeId === mode.id;
+        const diagrams =
+          boxesOpen && typeof renderScaleDiagrams === "function"
+            ? renderScaleDiagrams(mode.notes, {
+                root: suggestion.home,
+                label: "Позиции на грифе · R = корень",
+                midis: mode.midis,
+              })
+            : "";
+        const playOnly =
+          !boxesOpen && mode.midis?.length
+            ? `<button type="button" class="btn btn-glow btn-tiny scale-play-btn" data-play-melody="${mode.midis.join(",")}" aria-label="Проиграть лад">▶ Проиграть лад</button>`
+            : "";
+        return `
+          <article class="solo-mode ${idx === 0 ? "is-top" : ""}" data-solo-mode="${mode.id}">
+            <div class="solo-mode__head">
+              <p class="solo-mode__rank">${idx + 1}</p>
+              <div>
+                <h3 class="solo-mode__name">${title}</h3>
+                <p class="solo-mode__notes">${notes}</p>
+              </div>
+            </div>
+            <p class="solo-mode__why">${why}</p>
+            <div class="solo-mode__tools">
+              <button type="button" class="btn btn-ghost btn-tiny" data-toggle-solo-boxes="${mode.id}" aria-expanded="${boxesOpen ? "true" : "false"}">
+                ${boxesOpen ? "Скрыть боксы" : "Боксы на грифе"}
+              </button>
+              ${playOnly}
+            </div>
+            ${diagrams}
+          </article>`;
+      })
+      .join("");
+  }
+
+  stage.innerHTML = `
+    <p class="kicker">Соло</p>
+    <h1 class="h1">Над риффом</h1>
+    <p class="hand-note">${route}${suggestion?.start ? ` · центр ${suggestion.start}` : ""}${suggestion?.degrees ? ` · ступени ${suggestion.degrees}` : ""}</p>
+    ${voiceToggle}
+    <section class="solo-suggest is-open" id="soloSuggestPanel">
+      <h2 class="solo-suggest__title">Лад для соло</h2>
+      <p class="hand-note">Те же правила, что в Песне: покрытие хода, характер, безопасная пентатоника.</p>
+      <div class="solo-mode-list">${modesHtml}</div>
+    </section>
+    ${renderPdfPreviewBlock()}
+    <div class="actions sticky-actions">
+      <button type="button" class="btn btn-glow" id="exportPdf3">${plus ? "Выгрузить PDF" : "Показать лист PDF"}</button>
+      <button type="button" class="btn btn-primary" id="soloBackPath">К ходу</button>
+      <button type="button" class="btn btn-ghost" id="soloBackFret">К грифу</button>
+    </div>
+    <p class="song-save-status" id="soloStatus" hidden></p>
+  `;
+
+  document.getElementById("soloBackPath")?.addEventListener("click", () => setScreen("path"));
+  document.getElementById("soloBackFret")?.addEventListener("click", () => setScreen("fret"));
+  document.getElementById("exportPdf3")?.addEventListener("click", () => exportRiffPdfOrPreview());
+  stage.querySelectorAll("[data-toggle-solo-boxes]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.toggleSoloBoxes;
+      state.soloBoxesModeId = state.soloBoxesModeId === id ? null : id;
+      renderSolo();
+    });
+  });
+  bindMelodyPlayButtons(stage);
+  bindPdfPreviewActions();
+  suggestion?.modes?.forEach((m) => window.LadAudio?.prefetchMelody?.(m.midis, 55));
 }
 
 /* ---------- chrome ---------- */
 
 btnBack.addEventListener("click", () => {
-  if (state.screen === "develop") setScreen("path");
+  if (state.screen === "solo") setScreen("path");
+  else if (state.screen === "develop") setScreen("path");
   else if (state.screen === "path") setScreen("fret");
   else setScreen("fret");
 });
@@ -862,4 +1137,5 @@ try {
   }
 } catch (_) {}
 
+bindVoiceDelegation();
 setScreen("fret");
