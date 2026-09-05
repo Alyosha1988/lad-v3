@@ -739,6 +739,67 @@ function renderFret() {
   if (strip && prevStripScroll) strip.scrollLeft = prevStripScroll;
 }
 
+
+function fretsHaveInnerGap(frets) {
+  const idx = (frets || []).map((x, i) => (x >= 0 ? i : -1)).filter((i) => i >= 0);
+  if (idx.length < 2) return false;
+  return idx[idx.length - 1] - idx[0] + 1 !== idx.length;
+}
+
+/** Смешать сплошные и «через одну», чтобы в ряду были оба типа. */
+function diversifyShellAlts(list, limit = 4) {
+  const contig = [];
+  const gaps = [];
+  for (const v of list) {
+    if (fretsHaveInnerGap(v.frets)) gaps.push(v);
+    else contig.push(v);
+  }
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (out.length < limit && (i < contig.length || j < gaps.length)) {
+    if (i < contig.length) out.push(contig[i++]);
+    if (out.length >= limit) break;
+    if (j < gaps.length) out.push(gaps[j++]);
+  }
+  return out;
+}
+
+/** Урезанные альтернативы для слота хода (3–4 струны, в т.ч. через одну). */
+function slotShellAlts(idx) {
+  const slot = state.slots[idx];
+  if (!slot?.symbol || !slot.voicing?.frets) return [];
+  if (typeof listVoicingsNear !== "function") return [];
+  const ref =
+    state.slots[idx - 1]?.voicing ||
+    slot.voicing ||
+    null;
+  const curSig = typeof fretsSignature === "function" ? fretsSignature(slot.voicing.frets) : slot.voicing.frets.join(",");
+  // Для смены урезки якорим плотность на текущий (или предыдущий) хват, но не выше 4
+  const densityRef = {
+    frets: (ref?.frets || slot.voicing.frets).slice(),
+    tags: [...new Set([...(ref?.tags || []), "partial", "shell"])],
+  };
+  // если текущий полный — всё равно предложим урезки от 3–4
+  if (densityRef.frets.filter((f) => f >= 0).length >= 5) {
+    const f = densityRef.frets.slice();
+    f[0] = -1;
+    if (f[5] >= 0) f[5] = -1;
+    densityRef.frets = f;
+  }
+  const pool = listVoicingsNear(slot.symbol, densityRef, { limit: 14 })
+    .filter((v) => v?.frets)
+    .filter((v) => {
+      const sig = typeof fretsSignature === "function" ? fretsSignature(v.frets) : v.frets.join(",");
+      return sig !== curSig;
+    })
+    .filter((v) => {
+      const n = v.frets.filter((f) => f >= 0).length;
+      return n >= 3 && n <= 4;
+    });
+  return diversifyShellAlts(pool, 4);
+}
+
 /* ---------- Path ---------- */
 
 function renderPath() {
@@ -765,6 +826,29 @@ function renderPath() {
           fingers: typeof pianoFingers === "function" ? pianoFingers(slot.voicing.midis) : [],
         }, { step: idx + 1 });
       }
+      const shellAlts = slotShellAlts(idx);
+      const derived = !!(slot.voicing?.derived || (slot.voicing?.tags || []).includes("derived") || (slot.voicing?.tags || []).includes("shell"));
+      const sounding = (slot.voicing?.frets || []).filter((f) => f >= 0).length;
+      const densityNote = sounding
+        ? `<p class="slot-card__density">${sounding} стр.${derived ? " · под ваш хват" : ""}</p>`
+        : "";
+      const altsHtml = shellAlts.length
+        ? `<div class="slot-card__alts" aria-label="Другие урезанные">
+            <p class="slot-card__alts-label">Другие урезанные</p>
+            <div class="slot-card__alts-row">${shellAlts
+              .map((alt, ai) => {
+                const mini =
+                  alt.frets && typeof renderChordSvg === "function"
+                    ? renderChordSvg(slot.symbol, alt, { width: 72, height: 94 })
+                    : "";
+                const title = (alt.name || "вариант").replace(/"/g, "&quot;");
+                return `<button type="button" class="slot-alt" data-slot-alt="${idx}" data-alt-idx="${ai}" data-play-frets="${(alt.frets || []).join(",")}" title="${title}">${mini}</button>`;
+              })
+              .join("")}</div>
+          </div>`
+        : "";
+      // stash for click handlers
+      slot._shellAlts = shellAlts;
       return `
         <article class="slot-card" draggable="true" data-slot-id="${slot.id}" data-slot-idx="${idx}">
           <div class="slot-card__top">
@@ -772,7 +856,9 @@ function renderPath() {
             <strong>${slot.symbol}</strong>
             <span class="slot-card__voicing">${slot.voicing?.name || ""}</span>
           </div>
+          ${densityNote}
           ${diag}
+          ${altsHtml}
           <div class="slot-card__actions">
             ${
               slot.voicing?.frets
@@ -864,6 +950,23 @@ function renderPath() {
         setScreen("fret");
         return;
       }
+      if (typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying()) startRiffLoop();
+      renderPath();
+    });
+  });
+  stage.querySelectorAll("[data-slot-alt]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const si = +btn.dataset.slotAlt;
+      const ai = +btn.dataset.altIdx;
+      const slot = state.slots[si];
+      const alt = slot?._shellAlts?.[ai];
+      if (!slot || !alt?.frets) return;
+      slot.voicing = {
+        ...alt,
+        frets: alt.frets.slice(),
+        tags: [...(alt.tags || [])],
+      };
       if (typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying()) startRiffLoop();
       renderPath();
     });

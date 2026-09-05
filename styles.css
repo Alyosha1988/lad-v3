@@ -1989,6 +1989,47 @@ button[data-open-degrees].btn-glow {
   font-size: 0.8rem;
   color: var(--ink-mute);
 }
+.slot-card__density {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+.slot-card__alts {
+  margin: 0.55rem 0 0.15rem;
+}
+.slot-card__alts-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+.slot-card__alts-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.slot-alt {
+  margin: 0;
+  padding: 0.2rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(10, 9, 8, 0.55);
+  cursor: pointer;
+  line-height: 0;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.slot-alt:hover,
+.slot-alt:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: rgba(42, 28, 18, 0.55);
+  outline: none;
+}
+.slot-alt svg {
+  display: block;
+  width: 72px;
+  height: auto;
+}
 .slot-card__actions {
   display: flex;
   flex-wrap: wrap;

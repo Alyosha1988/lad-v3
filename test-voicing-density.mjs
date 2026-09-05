@@ -39,5 +39,15 @@ assert(contiguous(e.frets), "E7alt contiguous");
 assert(typeof listVoicingsNear === "function", "listVoicingsNear exported");
 assert(listVoicingsNear("Abaug", amPartial, { limit: 2 }).length >= 1, "alts");
 
+const densRef = { frets: amPartial.frets.slice(), tags: ["partial", "shell"] };
+const near = listVoicingsNear("Abaug", densRef, { limit: 12 });
+const hasSkip = near.some((v) => {
+  const idx = v.frets.map((x, i) => (x >= 0 ? i : -1)).filter((i) => i >= 0);
+  return idx.length >= 3 && idx[idx.length - 1] - idx[0] + 1 !== idx.length;
+});
+const hasTriad = near.some((v) => sounding(v.frets) === 3);
+assert(hasTriad, "has 3-string shell");
+assert(hasSkip, "has skip-one (через одну) shell");
+
 if (failed) process.exit(1);
 console.log("\nall passed");

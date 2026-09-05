@@ -732,6 +732,9 @@ function densityFitPenalty(candidate, reference) {
   if (!cp || !rp) return 0;
   let penalty = Math.abs(cp.count - rp.count) * 4.8;
   if (cp.class !== rp.class) penalty += 3.2;
+  // Полный хват в ходе — не подсовываем урезку вместо баррэ/открытой формы
+  if (rp.class === "full" && cp.count <= 4) penalty += 12;
+  if (rp.class === "full" && cp.class === "full") penalty -= 2.5;
   if (cp.muteLow === rp.muteLow) penalty -= 1.4;
   else penalty += 1.8;
   if (cp.muteHigh === rp.muteHigh) penalty -= 1.4;
@@ -745,96 +748,121 @@ function densityFitPenalty(candidate, reference) {
 }
 
 /**
- * Урезать полную постановку под целевую плотность (shell).
- * Снимаем только края звучащего блока — без дыр в середине.
+ * Урезать полную постановку: несколько окон.
+ * — 3 и 4 струны подряд;
+ * — 3 струны «через одну» (пропуск внутри четвёрки).
  */
 function deriveShellFromVoicing(base, reference, symbol) {
   if (!base?.frets) return [];
   const src = base.frets.slice();
   const srcCount = soundingStringCount(src);
-  const target = gripDensityProfile(reference)?.count ?? Math.min(4, srcCount);
-  if (srcCount <= target) return [];
+  if (srcCount < 3) return [];
 
   const chordPcs = new Set(chordPitchClasses(symbol || "") || []);
-  const preferMuteLow = !!gripDensityProfile(reference)?.muteLow;
-  const preferMuteHigh = !!gripDensityProfile(reference)?.muteHigh;
-
-  const frets = src.slice();
-  let count = srcCount;
-  let guard = 0;
-  while (count > target && guard++ < 8) {
-    let lo = -1;
-    let hi = -1;
-    for (let s = 0; s < frets.length; s++) {
-      if (frets[s] >= 0) {
-        if (lo < 0) lo = s;
-        hi = s;
-      }
-    }
-    if (lo < 0 || hi < 0 || lo === hi) break;
-
-    const tryMute = (s) => {
-      const trial = frets.slice();
-      trial[s] = FRET_MUTE;
-      const left = soundingStringCount(trial);
-      if (left < 3) return false;
-      // База уже из библиотеки (иногда с «лишней» струной). При урезании
-      // не требуем идеальной чистоты — достаточно сохранить ≥2 тона аккорда.
-      if (chordPcs.size) {
-        const kept = fretsPitchClasses(trial).filter((pc) => chordPcs.has(pc));
-        const uniq = new Set(kept);
-        if (uniq.size < Math.min(2, chordPcs.size)) return false;
-      }
-      frets[s] = FRET_MUTE;
-      count = left;
-      return true;
-    };
-
-    // приоритет краёв как у опоры
-    const order = [];
-    if (preferMuteLow && !preferMuteHigh) order.push(lo, hi);
-    else if (preferMuteHigh && !preferMuteLow) order.push(hi, lo);
-    else if (preferMuteLow && preferMuteHigh) order.push(lo, hi);
-    else {
-      // опора полная по краям — снимаем дальше от середины / с баса
-      order.push(lo, hi);
-    }
-
-    let muted = false;
-    for (const s of order) {
-      if (tryMute(s)) {
-        muted = true;
-        break;
-      }
-    }
-    if (!muted) break;
+  const soundingIdx = [];
+  for (let s = 0; s < src.length; s++) {
+    if (src[s] >= 0) soundingIdx.push(s);
   }
+  if (soundingIdx.length < 3) return [];
 
-  if (soundingStringCount(frets) >= srcCount) return [];
-  if (soundingStringCount(frets) < 3) return [];
-  if (fretsSignature(frets) === fretsSignature(src)) return [];
+  const seen = new Set();
+  const out = [];
 
-  return [
-    {
+  const okShell = (frets, minN) => {
+    const n = soundingStringCount(frets);
+    if (n < minN) return false;
+    if (chordPcs.size) {
+      const kept = fretsPitchClasses(frets).filter((pc) => chordPcs.has(pc));
+      if (new Set(kept).size < Math.min(2, chordPcs.size)) return false;
+    }
+    return true;
+  };
+
+  const push = (frets, note) => {
+    if (!okShell(frets, 3)) return;
+    const sig = fretsSignature(frets);
+    if (seen.has(sig) || sig === fretsSignature(src)) return;
+    // не возвращаем почти полную копию
+    if (soundingStringCount(frets) >= srcCount) return;
+    seen.add(sig);
+    out.push({
       ...base,
       id: `${base.id || "v"}-shell-${fretsIdPart(frets)}`,
-      name: `${base.name || "постановка"} · урезано`,
+      name: `${(base.name || "постановка").replace(/\s·\sурезано.*$/, "")} · ${note}`,
       frets,
       baseFret: computeBaseFret(frets),
       tags: [...new Set([...(base.tags || []), "partial", "shell", "derived"])],
       derived: true,
-    },
-  ];
+    });
+  };
+
+  // 1) сплошные окна из 3 и 4 звучащих струн
+  for (const n of [3, 4]) {
+    if (soundingIdx.length < n) continue;
+    for (let i = 0; i + n - 1 < soundingIdx.length; i++) {
+      const keep = new Set(soundingIdx.slice(i, i + n));
+      const frets = src.map((f, s) => (keep.has(s) ? f : FRET_MUTE));
+      push(frets, `${n} стр.`);
+    }
+  }
+
+  // 2) «через одну»: из 4 звучащих глушим одну внутреннюю → 3 с пропуском
+  if (soundingIdx.length >= 4) {
+    for (let i = 0; i + 3 < soundingIdx.length; i++) {
+      const four = soundingIdx.slice(i, i + 4);
+      for (const muteAt of [1, 2]) {
+        const keep = new Set(four.filter((_, j) => j !== muteAt));
+        const frets = src.map((f, s) => (keep.has(s) ? f : FRET_MUTE));
+        push(frets, "3 стр. · через одну");
+      }
+    }
+  }
+
+  // 3) если опора явно на 4 струны — дополнительно «срез краёв» как раньше (один быстрый путь)
+  const target = gripDensityProfile(reference)?.count;
+  if (target && target >= 3 && target <= 4 && soundingIdx.length > target) {
+    const preferMuteLow = !!gripDensityProfile(reference)?.muteLow;
+    const preferMuteHigh = !!gripDensityProfile(reference)?.muteHigh;
+    const frets = src.slice();
+    let count = srcCount;
+    let guard = 0;
+    while (count > target && guard++ < 8) {
+      let lo = -1;
+      let hi = -1;
+      for (let s = 0; s < frets.length; s++) {
+        if (frets[s] >= 0) {
+          if (lo < 0) lo = s;
+          hi = s;
+        }
+      }
+      if (lo < 0 || hi < 0 || lo === hi) break;
+      const order =
+        preferMuteHigh && !preferMuteLow ? [hi, lo] : [lo, hi];
+      let muted = false;
+      for (const s of order) {
+        const trial = frets.slice();
+        trial[s] = FRET_MUTE;
+        if (!okShell(trial, 3)) continue;
+        frets[s] = FRET_MUTE;
+        count = soundingStringCount(frets);
+        muted = true;
+        break;
+      }
+      if (!muted) break;
+    }
+    push(frets, `${soundingStringCount(frets)} стр.`);
+  }
+
+  return out;
 }
 
 function expandVoicingsForDensity(list, reference, symbol) {
-  if (!reference?.frets || !list?.length) return list || [];
-  const refCount = soundingStringCount(reference.frets);
-  if (refCount >= 5) return list.slice();
+  if (!list?.length) return list || [];
   const expanded = list.slice();
   const seen = new Set(list.map((v) => fretsSignature(v.frets)));
   for (const v of list) {
-    if (soundingStringCount(v.frets) <= refCount + 0.5) continue;
+    if ((v.tags || []).includes("derived")) continue;
+    if (soundingStringCount(v.frets) < 4) continue;
     for (const shell of deriveShellFromVoicing(v, reference, symbol)) {
       const sig = fretsSignature(shell.frets);
       if (seen.has(sig)) continue;
