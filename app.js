@@ -1212,6 +1212,14 @@ function buildIdeas() {
   const ref = lastPathVoicing();
   next.forEach((idea) => {
     idea.voicing = voicingForSymbol(idea.symbol, ref);
+    if (typeof listVoicingsNear === "function") {
+      const alts = listVoicingsNear(idea.symbol, ref, { limit: 3 });
+      idea.voicingAlts = alts.filter(
+        (v) => !idea.voicing?.frets || v.frets?.join(",") !== idea.voicing.frets.join(",")
+      );
+    } else {
+      idea.voicingAlts = [];
+    }
   });
 
   return { next: next.slice(0, 8), rest: rest.slice(0, 16) };
@@ -1323,7 +1331,26 @@ function renderNextChordBlock(nextIdeas, key) {
           : "";
       const fretAttr = v?.frets ? ` data-preview-frets="${v.frets.join(",")}"` : "";
       const midiAttr = v?.midis ? ` data-preview-midis="${v.midis.join(",")}"` : "";
+      const addFretAttr = v?.frets ? ` data-add-frets="${v.frets.join(",")}"` : "";
+      const sounding = (v?.frets || []).filter((f) => f >= 0).length;
+      const derived = !!(v?.derived || (v?.tags || []).includes("derived"));
       const gripHint = v?.name ? `<p class="next-chord-card__grip">${v.name}</p>` : "";
+      const densityHint = sounding
+        ? `<p class="next-chord-card__density">${sounding} стр.${derived ? " · под ваш хват" : ""}</p>`
+        : "";
+      const alts = (idea.voicingAlts || []).slice(0, 2);
+      const altsHtml = alts.length
+        ? `<div class="next-chord-card__alts" aria-label="Другие в том же стиле">${alts
+            .map((alt) => {
+              const mini =
+                typeof renderChordSvg === "function"
+                  ? renderChordSvg(idea.symbol, alt, { width: 64, height: 84 })
+                  : "";
+              const af = alt.frets ? ` data-preview-frets="${alt.frets.join(",")}" data-add-frets="${alt.frets.join(",")}"` : "";
+              return `<button type="button" class="next-chord-alt" data-idea-add="${idea.addSymbol}"${af} title="${alt.name || "вариант"}">${mini}</button>`;
+            })
+            .join("")}</div>`
+        : "";
       const spice =
         idea.spice === "spicy"
           ? `<span class="next-chord-card__spice">хитро</span>`
@@ -1336,10 +1363,12 @@ function renderNextChordBlock(nextIdeas, key) {
         <h3 class="next-chord-card__sym">${idea.symbol}</h3>
         <p class="next-chord-card__why">${idea.why}</p>
         ${gripHint}
+        ${densityHint}
         <div class="next-chord-card__diag">${diag}</div>
+        ${altsHtml}
         <div class="next-chord-card__actions">
           <button type="button" class="btn btn-ghost btn-tiny" data-preview-with-path${fretAttr}${midiAttr}>▶ с ходом</button>
-          <button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">В ход</button>
+          <button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}"${addFretAttr}>В ход</button>
         </div>
       </article>`;
     })
@@ -1348,7 +1377,7 @@ function renderNextChordBlock(nextIdeas, key) {
     <section class="next-chord-block" aria-label="Следующий аккорд">
       <div class="next-chord-block__head">
         <p class="kicker">Следующий аккорд</p>
-        <p class="hand-note">По функции в тональности ${keyHint} · постановка рядом с вашим хватом · один шаг</p>
+        <p class="hand-note">По функции в тональности ${keyHint} · плотность хвата как у вас · один шаг</p>
       </div>
       ${flavorChips}
       <div class="next-chord-grid">${cards}</div>
@@ -1549,7 +1578,18 @@ function renderDevelop() {
   stage.querySelectorAll("[data-idea-add]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const sym = btn.dataset.ideaAdd;
-      const v = cloneVoicing(voicingForSymbol(sym, lastPathVoicing())) || fallbackVoicing(sym);
+      let v = null;
+      if (btn.dataset.addFrets) {
+        const frets = btn.dataset.addFrets.split(",").map((n) => parseInt(n, 10));
+        v = {
+          name: "под ваш хват",
+          frets,
+          tags: ["from-idea"],
+          instrument: "guitar",
+        };
+      } else {
+        v = cloneVoicing(voicingForSymbol(sym, lastPathVoicing())) || fallbackVoicing(sym);
+      }
       addSlot(sym, v);
       setScreen("path");
     });

@@ -2187,3 +2187,32 @@ button[data-open-degrees].btn-glow {
 .idea-card__kind {
   text-transform: none;
 }
+
+
+.next-chord-card__density {
+  margin: 0.1rem 0 0.35rem;
+  font-size: 0.75rem;
+  color: var(--ink-mute);
+}
+.next-chord-card__alts {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.2rem 0 0.45rem;
+  overflow-x: auto;
+}
+.next-chord-alt {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: rgba(12, 10, 8, 0.55);
+  border-radius: 8px;
+  padding: 0.15rem;
+  cursor: pointer;
+}
+.next-chord-alt:hover,
+.next-chord-alt:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+.next-chord-alt .chord-diag {
+  margin: 0;
+}

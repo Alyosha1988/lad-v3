@@ -686,9 +686,167 @@ function midiCenter(midis) {
   return midis.reduce((s, m) => s + m, 0) / midis.length;
 }
 
+const GUITAR_OPEN_MIDI = [40, 45, 50, 55, 59, 64];
+
+function soundingStringCount(frets) {
+  return (frets || []).filter((f) => f != null && f >= 0).length;
+}
+
+function densityClass(count) {
+  if (count >= 5) return "full";
+  if (count >= 3) return "shell";
+  return "sparse";
+}
+
+/** Профиль плотности хвата: сколько струн и какие края глушатся. */
+function gripDensityProfile(voicing) {
+  const frets = voicing?.frets;
+  if (!frets?.length) return null;
+  const count = soundingStringCount(frets);
+  return {
+    count,
+    class: densityClass(count),
+    muteLow: frets[0] < 0,
+    muteHigh: frets[frets.length - 1] < 0,
+    mask: frets.map((f) => (f >= 0 ? 1 : 0)),
+  };
+}
+
+function fretsPitchClasses(frets) {
+  const out = [];
+  (frets || []).forEach((f, s) => {
+    if (f == null || f < 0) return;
+    out.push((GUITAR_OPEN_MIDI[s] + f) % 12);
+  });
+  return out;
+}
+
+/**
+ * Штраф/бонус за совпадение плотности с опорным хватом.
+ * Полный ход → полные постановки; урезанный → shell/partial.
+ */
+function densityFitPenalty(candidate, reference) {
+  const cp = gripDensityProfile(candidate);
+  const rp = gripDensityProfile(reference);
+  if (!cp || !rp) return 0;
+  let penalty = Math.abs(cp.count - rp.count) * 4.8;
+  if (cp.class !== rp.class) penalty += 3.2;
+  if (cp.muteLow === rp.muteLow) penalty -= 1.4;
+  else penalty += 1.8;
+  if (cp.muteHigh === rp.muteHigh) penalty -= 1.4;
+  else penalty += 1.8;
+  const ct = candidate.tags || [];
+  const rt = reference.tags || [];
+  if (rt.includes("partial") && (ct.includes("partial") || ct.includes("shell"))) penalty -= 1.5;
+  if (rt.includes("compact") && (ct.includes("compact") || ct.includes("shell"))) penalty -= 1.2;
+  if (rp.class === "full" && ct.includes("partial") && !ct.includes("derived")) penalty += 1.2;
+  return penalty;
+}
+
+/**
+ * Урезать полную постановку под целевую плотность (shell).
+ * Снимаем только края звучащего блока — без дыр в середине.
+ */
+function deriveShellFromVoicing(base, reference, symbol) {
+  if (!base?.frets) return [];
+  const src = base.frets.slice();
+  const srcCount = soundingStringCount(src);
+  const target = gripDensityProfile(reference)?.count ?? Math.min(4, srcCount);
+  if (srcCount <= target) return [];
+
+  const chordPcs = new Set(chordPitchClasses(symbol || "") || []);
+  const preferMuteLow = !!gripDensityProfile(reference)?.muteLow;
+  const preferMuteHigh = !!gripDensityProfile(reference)?.muteHigh;
+
+  const frets = src.slice();
+  let count = srcCount;
+  let guard = 0;
+  while (count > target && guard++ < 8) {
+    let lo = -1;
+    let hi = -1;
+    for (let s = 0; s < frets.length; s++) {
+      if (frets[s] >= 0) {
+        if (lo < 0) lo = s;
+        hi = s;
+      }
+    }
+    if (lo < 0 || hi < 0 || lo === hi) break;
+
+    const tryMute = (s) => {
+      const trial = frets.slice();
+      trial[s] = FRET_MUTE;
+      const left = soundingStringCount(trial);
+      if (left < 3) return false;
+      // База уже из библиотеки (иногда с «лишней» струной). При урезании
+      // не требуем идеальной чистоты — достаточно сохранить ≥2 тона аккорда.
+      if (chordPcs.size) {
+        const kept = fretsPitchClasses(trial).filter((pc) => chordPcs.has(pc));
+        const uniq = new Set(kept);
+        if (uniq.size < Math.min(2, chordPcs.size)) return false;
+      }
+      frets[s] = FRET_MUTE;
+      count = left;
+      return true;
+    };
+
+    // приоритет краёв как у опоры
+    const order = [];
+    if (preferMuteLow && !preferMuteHigh) order.push(lo, hi);
+    else if (preferMuteHigh && !preferMuteLow) order.push(hi, lo);
+    else if (preferMuteLow && preferMuteHigh) order.push(lo, hi);
+    else {
+      // опора полная по краям — снимаем дальше от середины / с баса
+      order.push(lo, hi);
+    }
+
+    let muted = false;
+    for (const s of order) {
+      if (tryMute(s)) {
+        muted = true;
+        break;
+      }
+    }
+    if (!muted) break;
+  }
+
+  if (soundingStringCount(frets) >= srcCount) return [];
+  if (soundingStringCount(frets) < 3) return [];
+  if (fretsSignature(frets) === fretsSignature(src)) return [];
+
+  return [
+    {
+      ...base,
+      id: `${base.id || "v"}-shell-${fretsIdPart(frets)}`,
+      name: `${base.name || "постановка"} · урезано`,
+      frets,
+      baseFret: computeBaseFret(frets),
+      tags: [...new Set([...(base.tags || []), "partial", "shell", "derived"])],
+      derived: true,
+    },
+  ];
+}
+
+function expandVoicingsForDensity(list, reference, symbol) {
+  if (!reference?.frets || !list?.length) return list || [];
+  const refCount = soundingStringCount(reference.frets);
+  if (refCount >= 5) return list.slice();
+  const expanded = list.slice();
+  const seen = new Set(list.map((v) => fretsSignature(v.frets)));
+  for (const v of list) {
+    if (soundingStringCount(v.frets) <= refCount + 0.5) continue;
+    for (const shell of deriveShellFromVoicing(v, reference, symbol)) {
+      const sig = fretsSignature(shell.frets);
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      expanded.push(shell);
+    }
+  }
+  return expanded;
+}
+
 /**
  * Насколько постановка кандидата близка к опорной (хват в ходе).
- * Меньше = лучше.
+ * Меньше = лучше. Плотность струн весит сильнее сдвига по грифу.
  */
 function scoreVoicingNear(candidate, reference) {
   if (!candidate) return 1e9;
@@ -699,12 +857,14 @@ function scoreVoicingNear(candidate, reference) {
     let score = fretShiftCost(candidate.frets, reference.frets);
     score += Math.abs(voicingCenter(candidate.frets) - voicingCenter(reference.frets)) * 1.35;
     score += Math.abs(ca - ra) * 1.1;
+    score += densityFitPenalty(candidate, reference);
     if (candidate.form && reference.form && candidate.form === reference.form) score -= 5;
     const ct = candidate.tags || [];
     const rt = reference.tags || [];
     if (ct.includes("barre") && rt.includes("barre")) score -= 1.5;
     if (ct.includes("open") && rt.includes("open")) score -= 1.2;
     if (ct.includes("compact") && rt.includes("compact")) score -= 1;
+    if (ct.includes("derived")) score += 0.35; // чуть предпочитаем живые из базы при равной плотности
     return score;
   }
   if (candidate.midis && reference.midis) {
@@ -719,7 +879,7 @@ function scoreVoicingNear(candidate, reference) {
 
 /**
  * Лучшая постановка символа рядом с опорным хватом.
- * Инструмент берётся из опоры (гитара / фортепиано).
+ * Инструмент и плотность струн берутся из опоры.
  */
 function pickVoicingNear(symbol, reference, opts = {}) {
   if (!symbol) return null;
@@ -728,12 +888,13 @@ function pickVoicingNear(symbol, reference, opts = {}) {
     reference?.instrument === "piano" ||
     opts.instrument === "piano"
   );
-  const list = preferPiano ? getPianoVoicings(symbol) : getGuitarVoicings(symbol);
+  let list = preferPiano ? getPianoVoicings(symbol) : getGuitarVoicings(symbol);
   if (!list.length) {
     const alt = preferPiano ? getGuitarVoicings(symbol) : getPianoVoicings(symbol);
     return alt[0] || null;
   }
   if (!reference) return list[0];
+  if (!preferPiano) list = expandVoicingsForDensity(list, reference, symbol);
   let best = list[0];
   let bestScore = scoreVoicingNear(best, reference);
   for (let i = 1; i < list.length; i++) {
@@ -744,6 +905,25 @@ function pickVoicingNear(symbol, reference, opts = {}) {
     }
   }
   return best;
+}
+
+/** Несколько ближайших постановок той же плотности (для альтернатив на карточке). */
+function listVoicingsNear(symbol, reference, opts = {}) {
+  const limit = opts.limit ?? 3;
+  const preferPiano = !!(
+    reference?.midis ||
+    reference?.instrument === "piano" ||
+    opts.instrument === "piano"
+  );
+  let list = preferPiano ? getPianoVoicings(symbol) : getGuitarVoicings(symbol);
+  if (!list.length) return [];
+  if (!reference) return list.slice(0, limit);
+  if (!preferPiano) list = expandVoicingsForDensity(list, reference, symbol);
+  return list
+    .map((v) => ({ v, s: scoreVoicingNear(v, reference) }))
+    .sort((a, b) => a.s - b.s)
+    .slice(0, limit)
+    .map((x) => x.v);
 }
 
 /** Цепочка постановок под символы, опираясь на предыдущий хват. */
@@ -771,6 +951,7 @@ if (typeof window !== "undefined") {
     getVoicings,
     pickVoicingNear,
     pickVoicingChain,
+    listVoicingsNear,
     scoreVoicingNear,
     listKnownQualities,
     listLibrarySymbols,
@@ -798,6 +979,7 @@ if (typeof window !== "undefined") {
   window.getPianoVoicings = getPianoVoicings;
   window.pickVoicingNear = pickVoicingNear;
   window.pickVoicingChain = pickVoicingChain;
+  window.listVoicingsNear = listVoicingsNear;
   window.scoreVoicingNear = scoreVoicingNear;
   window.listKnownQualities = listKnownQualities;
   window.splitChordSymbol = splitChordSymbol;
@@ -818,6 +1000,7 @@ if (typeof module !== "undefined" && module.exports) {
     getVoicings,
     pickVoicingNear,
     pickVoicingChain,
+    listVoicingsNear,
     scoreVoicingNear,
     listKnownQualities,
     listLibrarySymbols,
