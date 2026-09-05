@@ -686,7 +686,8 @@ function midiCenter(midis) {
   return midis.reduce((s, m) => s + m, 0) / midis.length;
 }
 
-const GUITAR_OPEN_MIDI = [40, 45, 50, 55, 59, 64];
+/** Локально для плотности/shell — не пересекается с detect.js GUITAR_OPEN_MIDI. */
+const VOICING_OPEN_MIDI = [40, 45, 50, 55, 59, 64];
 
 function soundingStringCount(frets) {
   return (frets || []).filter((f) => f != null && f >= 0).length;
@@ -716,7 +717,7 @@ function fretsPitchClasses(frets) {
   const out = [];
   (frets || []).forEach((f, s) => {
     if (f == null || f < 0) return;
-    out.push((GUITAR_OPEN_MIDI[s] + f) % 12);
+    out.push((VOICING_OPEN_MIDI[s] + f) % 12);
   });
   return out;
 }
