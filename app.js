@@ -842,7 +842,7 @@ function renderPath() {
                     ? renderChordSvg(slot.symbol, alt, { width: 72, height: 94 })
                     : "";
                 const title = (alt.name || "вариант").replace(/"/g, "&quot;");
-                return `<button type="button" class="slot-alt" data-slot-alt="${idx}" data-alt-idx="${ai}" data-play-frets="${(alt.frets || []).join(",")}" title="${title}">${mini}</button>`;
+                return `<button type="button" class="slot-alt" data-slot-alt="${idx}" data-alt-idx="${ai}" title="${title}">${mini}</button>`;
               })
               .join("")}</div>
           </div>`
@@ -956,6 +956,7 @@ function renderPath() {
   });
   stage.querySelectorAll("[data-slot-alt]").forEach((btn) => {
     btn.addEventListener("click", (e) => {
+      e.preventDefault();
       e.stopPropagation();
       const si = +btn.dataset.slotAlt;
       const ai = +btn.dataset.altIdx;
@@ -967,6 +968,11 @@ function renderPath() {
         frets: alt.frets.slice(),
         tags: [...(alt.tags || [])],
       };
+      try {
+        if (typeof LadAudio !== "undefined" && typeof LadAudio.playVoicing === "function") {
+          LadAudio.playVoicing(alt.frets);
+        }
+      } catch (_) {}
       if (typeof LadRiffLoop !== "undefined" && LadRiffLoop.isPlaying()) startRiffLoop();
       renderPath();
     });
