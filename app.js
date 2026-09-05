@@ -23,6 +23,7 @@ const state = {
   dragFrom: null,
   pdfPreview: false,
   soloBoxesModeId: null,
+  developMood: null, // null = авто по первому аккорду
   loop: {
     tempo: 90,
     patternId: "folk",
@@ -906,14 +907,117 @@ function flash(text) {
 
 /* ---------- Develop ---------- */
 
+function chordLooksMinor(symbol) {
+  const p = typeof parseChord === "function" ? parseChord(symbol) : null;
+  if (p) return !!p.isMinor;
+  return /m(?!aj)/i.test(String(symbol || "").replace(/^[A-G][b#]?/, ""));
+}
+
+function resolveDevelopMood() {
+  if (state.developMood) return state.developMood;
+  const start = pathSymbols()[0];
+  return chordLooksMinor(start) ? "dark" : "bright";
+}
+
+function catalogMoodList() {
+  if (typeof MOODS !== "undefined" && Array.isArray(MOODS)) return MOODS;
+  if (typeof LadCatalog !== "undefined" && Array.isArray(LadCatalog.MOODS)) return LadCatalog.MOODS;
+  return [
+    { id: "bright", title: "Светлое" },
+    { id: "dark", title: "Тёмное" },
+    { id: "tense", title: "Напряжённое" },
+    { id: "dream", title: "Мечтательное" },
+    { id: "groovy", title: "Грув" },
+  ];
+}
+
+function fetchCatalogIdeas() {
+  const path = pathSymbols();
+  if (!path.length) return { key: null, ideas: [], mood: "dark" };
+  const progFn =
+    typeof progressionsFor === "function"
+      ? progressionsFor
+      : typeof LadCatalog !== "undefined"
+        ? LadCatalog.progressionsFor
+        : null;
+  if (!progFn) return { key: null, ideas: [], mood: resolveDevelopMood() };
+  const mood = resolveDevelopMood();
+  const start = path[0];
+  const { key, ideas } = progFn({
+    start,
+    mood,
+    move: "home",
+    part: "verse",
+    style: "all",
+  });
+  return { key, ideas: ideas || [], mood };
+}
+
+function symbolsMatch(a, b) {
+  return String(a || "").replace(/\s/g, "") === String(b || "").replace(/\s/g, "");
+}
+
+function nextChordsFromCatalog(last, catalogIdeas) {
+  const found = [];
+  const seen = new Set();
+  for (const idea of catalogIdeas) {
+    const p = idea.path || [];
+    for (let i = 0; i < p.length - 1; i++) {
+      if (!symbolsMatch(p[i], last)) continue;
+      const n = p[i + 1];
+      if (seen.has(n)) continue;
+      seen.add(n);
+      found.push({ symbol: n, why: idea.why || idea.kind, from: idea.kind });
+      if (found.length >= 8) return found;
+    }
+  }
+  return found;
+}
+
 function buildIdeas() {
   const path = pathSymbols();
   if (!path.length) return [];
   const ideas = [];
   const last = path[path.length - 1];
   const first = path[0];
+  const { key, ideas: catalog, mood } = fetchCatalogIdeas();
 
-  // voicing alternatives for each unique symbol
+  // 1) быстрые «следующие» из каталога Песни
+  nextChordsFromCatalog(last, catalog).forEach((n) => {
+    ideas.push({
+      kind: "continue",
+      title: `Продолжить → ${n.symbol}`,
+      why: n.why || `Частый шаг после ${last} в каталоге Песни.`,
+      path: path.concat(n.symbol),
+      addSymbol: n.symbol,
+    });
+  });
+
+  // 2) готовые ходы из каталога (тот же источник, что в Песне)
+  const pathKey = path.join("→");
+  catalog.slice(0, 14).forEach((idea) => {
+    const ideaPath = idea.path || [];
+    if (!ideaPath.length) return;
+    if (ideaPath.join("→") === pathKey) return;
+    const canAppend =
+      ideaPath.length > 1 && symbolsMatch(ideaPath[0], last)
+        ? ideaPath.slice(1)
+        : null;
+    ideas.push({
+      kind: "catalog",
+      title: idea.kind,
+      why: [idea.family, idea.why].filter(Boolean).join(" · "),
+      path: ideaPath,
+      setPath: ideaPath,
+      appendSymbols: canAppend,
+      family: idea.family,
+      style: idea.style,
+      mood,
+      keyLabel: key ? `${key.tonic}${key.mode === "minor" ? "m" : ""}` : "",
+    });
+  });
+
+  // 3) другие постановки текущего хода
   const uniq = [...new Set(path)];
   uniq.forEach((sym) => {
     const vs = typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym) : [];
@@ -929,44 +1033,19 @@ function buildIdeas() {
     }
   });
 
-  // continue suggestions (simple diatonic neighbors)
-  const continueMap = {
-    Am: ["G", "F", "Em", "Dm", "C"],
-    C: ["G", "Am", "F", "Em", "Dm"],
-    G: ["C", "D", "Em", "Am", "Bm"],
-    Em: ["Am", "D", "C", "G", "Bm"],
-    D: ["G", "A", "Bm", "Em", "F#m"],
-    Dm: ["Am", "C", "G", "F", "Bb"],
-    F: ["C", "G", "Am", "Dm", "Bb"],
-    E: ["A", "B", "C#m", "F#m"],
-    A: ["D", "E", "F#m", "Bm"],
-  };
-  const cont = continueMap[last] || continueMap[first] || ["C", "G", "Am", "F"];
-  cont.slice(0, 3).forEach((n) => {
-    if (path.includes(n) && path.length > 1) return;
-    ideas.push({
-      kind: "continue",
-      title: `Продолжить → ${n}`,
-      why: `После ${last} часто берут ${n}. Добавьте в конец хода.`,
-      path: path.concat(n),
-      addSymbol: n,
-    });
-  });
-
-  // substitution
-  const subs = { G: "Em", Em: "G", C: "Am", Am: "C", F: "Dm", Dm: "F", D: "Bm", A: "F#m" };
+  // 4) родственная замена последнего
+  const subs = { G: "Em", Em: "G", C: "Am", Am: "C", F: "Dm", Dm: "F", D: "Bm", A: "F#m", E: "C#m", B: "G#m" };
   if (subs[last]) {
-    const alt = path.slice(0, -1).concat(subs[last]);
     ideas.push({
       kind: "swap",
       title: `Заменить ${last} → ${subs[last]}`,
       why: "Родственная замена: мягче или светлее при том же каркасе.",
-      path: alt,
+      path: path.slice(0, -1).concat(subs[last]),
       replaceLast: subs[last],
     });
   }
 
-  // loop / vamp
+  // 5) петля
   if (path.length === 1) {
     ideas.push({
       kind: "vamp",
@@ -984,7 +1063,46 @@ function buildIdeas() {
     });
   }
 
-  return ideas.slice(0, 8);
+  return ideas.slice(0, 22);
+}
+
+function applyIdeaPath(symbols) {
+  const list = (symbols || []).filter(Boolean);
+  if (!list.length) return;
+  state.slots = list.map((sym) => {
+    const v =
+      typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym)[0] : null;
+    return {
+      id: uid(),
+      symbol: sym,
+      voicing: v || { name: "—", frets: emptyFrets(), instrument: "guitar" },
+    };
+  });
+}
+
+function appendIdeaSymbols(symbols) {
+  (symbols || []).forEach((sym) => {
+    const v =
+      typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym)[0] : null;
+    addSlot(sym, v || { name: "—", frets: emptyFrets(), instrument: "guitar" });
+  });
+}
+
+function renderDevelopMoodChips() {
+  const active = resolveDevelopMood();
+  const auto = !state.developMood;
+  const chips = catalogMoodList()
+    .map(
+      (m) =>
+        `<button type="button" class="chip chip-btn ${active === m.id && !auto ? "is-on" : ""}" data-dev-mood="${m.id}">${m.title}</button>`
+    )
+    .join("");
+  return `
+    <div class="chip-row develop-moods" aria-label="Настроение каталога">
+      <button type="button" class="chip chip-btn ${auto ? "is-on" : ""}" data-dev-mood="auto">Авто</button>
+      ${chips}
+    </div>
+    <p class="hand-note">Каталог ходов — как в Песне · центр ${pathSymbols()[0] || "—"}${auto ? ` · настроение «${active}»` : ""}</p>`;
 }
 
 function renderDevelop() {
@@ -994,9 +1112,11 @@ function renderDevelop() {
   }
   const ideas = buildIdeas();
   const route = pathSymbols().join(" → ");
+  const { key } = fetchCatalogIdeas();
+  const keyHint = key ? ` · тональность ${key.tonic}${key.mode === "minor" ? "m" : ""}` : "";
 
   const blocks = ideas
-    .map((idea, idx) => {
+    .map((idea) => {
       let extra = "";
       if (idea.voicings) {
         extra = `<div class="voicing-strip">${idea.voicings
@@ -1005,9 +1125,15 @@ function renderDevelop() {
       } else {
         extra = `<p class="idea-path">${idea.path.join(" → ")}</p>`;
       }
+      const kindLabel =
+        idea.kind === "catalog"
+          ? idea.family || "каталог"
+          : idea.kind === "continue"
+            ? "далее"
+            : idea.kind;
       return `
         <article class="idea-card">
-          <p class="idea-card__kind">${idea.kind}</p>
+          <p class="idea-card__kind">${kindLabel}</p>
           <h3 class="idea-card__title">${idea.title}</h3>
           <p class="idea-card__why">${idea.why}</p>
           ${extra}
@@ -1015,6 +1141,16 @@ function renderDevelop() {
             ${
               idea.addSymbol
                 ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">Добавить в ход</button>`
+                : ""
+            }
+            ${
+              idea.setPath
+                ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-set="${idea.setPath.join("|")}">Поставить ход</button>`
+                : ""
+            }
+            ${
+              idea.appendSymbols?.length
+                ? `<button type="button" class="btn btn-ghost btn-tiny" data-idea-append="${idea.appendSymbols.join("|")}">Добавить хвост</button>`
                 : ""
             }
             ${
@@ -1040,7 +1176,8 @@ function renderDevelop() {
   stage.innerHTML = `
     <p class="kicker">Развитие</p>
     <h1 class="h1">Идеи вокруг хода</h1>
-    <p class="hand-note">${route}</p>
+    <p class="hand-note">${route}${keyHint}</p>
+    ${renderDevelopMoodChips()}
     <div class="idea-list">${blocks || "<p class='hand-note'>Добавьте аккорд — появятся идеи.</p>"}</div>
     <div class="actions sticky-actions">
       <button type="button" class="btn btn-primary" id="backPath">К ходу</button>
@@ -1073,6 +1210,14 @@ function renderDevelop() {
     }
   });
 
+  stage.querySelectorAll("[data-dev-mood]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.devMood;
+      state.developMood = id === "auto" ? null : id;
+      renderDevelop();
+    });
+  });
+
   stage.querySelectorAll("[data-idea-add]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const sym = btn.dataset.ideaAdd;
@@ -1094,11 +1239,13 @@ function renderDevelop() {
   });
   stage.querySelectorAll("[data-idea-set]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const syms = btn.dataset.ideaSet.split("|");
-      state.slots = syms.map((sym) => {
-        const v = typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym)[0] : null;
-        return { id: uid(), symbol: sym, voicing: v || { name: "—", frets: emptyFrets() } };
-      });
+      applyIdeaPath(btn.dataset.ideaSet.split("|"));
+      setScreen("path");
+    });
+  });
+  stage.querySelectorAll("[data-idea-append]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      appendIdeaSymbols(btn.dataset.ideaAppend.split("|"));
       setScreen("path");
     });
   });
