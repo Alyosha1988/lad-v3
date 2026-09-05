@@ -323,6 +323,37 @@ function renderPdfPreviewBlock() {
       : { degrees: "", functions: "", modeLine: "", summary: "" };
   const plus = hasPlus();
   const names = state.slots.map((s) => s.voicing?.name || "постановка").join(" · ");
+
+  const voice = typeof LadTheory !== "undefined" && typeof LadTheory.getVoice === "function" ? LadTheory.getVoice() : "plain";
+  let soloPreviewHtml = "";
+  if (typeof LadTheory !== "undefined" && typeof LadTheory.suggestSoloModes === "function") {
+    const suggestion = LadTheory.suggestSoloModes(item, { moodId: item.mood });
+    const top = suggestion?.modes?.[0];
+    const flavor = typeof resolveSoloPhraseFlavor === "function" ? resolveSoloPhraseFlavor() : "simple";
+    const pack = top && typeof LadTheory.suggestSoloPhrases === "function"
+      ? LadTheory.suggestSoloPhrases(item, top, { flavor })
+      : null;
+    if (pack?.slots?.length) {
+      const modeTitle = voice === "pro" ? pack.modeNamePro || top.namePro : pack.modeNamePlain || top.namePlain;
+      const flavorLabel = pack.flavor === "spicy" ? "хитро" : "просто";
+      const slotsHtml = pack.slots.map((slot) => {
+        const grip = state.slots[slot.index]?.voicing?.frets || null;
+        const prefer = typeof preferNeckCenter === "function" ? preferNeckCenter(grip) : 5;
+        const phrasesHtml = (slot.phrases || []).map((phrase) => {
+          const title = LadTheory.soloPhraseTitle(phrase, voice);
+          const notes = (phrase.notes || []).join(" · ");
+          const fingering =
+            typeof renderPhraseFingering === "function"
+              ? renderPhraseFingering(phrase.midis, { preferCenter: prefer, title, caption: notes })
+              : "";
+          return `<article class="solo-phrase solo-phrase--pdf"><h4 class="solo-phrase__title">${title}</h4><p class="solo-phrase__notes">${notes}</p>${fingering}</article>`;
+        }).join("");
+        return `<div class="solo-phrase-slot"><h3 class="solo-phrase-slot__title">${slot.index + 1} · ${slot.symbol}</h3><div class="solo-phrase-slot__list">${phrasesHtml}</div></div>`;
+      }).join("");
+      soloPreviewHtml = `<h3>Соло · фразы</h3><p>Лад: ${modeTitle} · ${flavorLabel}</p><div class="solo-phrase-slots">${slotsHtml}</div>`;
+    }
+  }
+
   return `
     <div class="pdf-preview-frame" id="pdfPreview">
       <h3>Лист риффа — вид как после оплаты</h3>
@@ -335,6 +366,7 @@ function renderPdfPreviewBlock() {
       <p>${pass.summary || ""}</p>
       <p>Хваты: ${names}</p>
       <p>На листе — те постановки, которые вы добавили в ход, не первая из базы.</p>
+      ${soloPreviewHtml}
       <div class="pdf-preview-actions actions">
         ${
           plus
@@ -1136,6 +1168,16 @@ function renderSoloPhrasesBlock(suggestion, voice) {
           const why = LadTheory.soloPhraseWhy(phrase, voice);
           const notes = (phrase.notes || []).join(" · ");
           const midis = (phrase.midis || []).join(",");
+          const grip = state.slots[slot.index]?.voicing?.frets || null;
+          const prefer = typeof preferNeckCenter === "function" ? preferNeckCenter(grip) : 5;
+          const fingering =
+            typeof renderPhraseFingering === "function"
+              ? renderPhraseFingering(phrase.midis, {
+                  preferCenter: prefer,
+                  title,
+                  caption: notes,
+                })
+              : "";
           return `
             <article class="solo-phrase">
               <div class="solo-phrase__head">
@@ -1144,6 +1186,7 @@ function renderSoloPhrasesBlock(suggestion, voice) {
               </div>
               <p class="solo-phrase__notes">${notes}</p>
               <p class="solo-phrase__why">${why}</p>
+              ${fingering}
             </article>`;
         })
         .join("");

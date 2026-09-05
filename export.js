@@ -54,6 +54,78 @@ function collectSongExportData() {
   return collectRiffExportData();
 }
 
+
+function resolveExportPhraseFlavor() {
+  try {
+    if (typeof resolveSoloPhraseFlavor === "function") return resolveSoloPhraseFlavor();
+    if (typeof state !== "undefined" && state?.soloPhraseFlavor === "spicy") return "spicy";
+    const raw = localStorage.getItem("lad-riff-solo-phrase-flavor");
+    return raw === "spicy" ? "spicy" : "simple";
+  } catch (_) {
+    return "simple";
+  }
+}
+
+function collectSoloPhraseExport(slots, path) {
+  if (typeof LadTheory === "undefined" || typeof LadTheory.suggestSoloModes !== "function") return null;
+  if (!path?.length) return null;
+  const item = {
+    path: path.slice(),
+    start: path[0],
+    mood: inferRiffMood(path[0]),
+  };
+  const suggestion = LadTheory.suggestSoloModes(item, { moodId: item.mood });
+  const mode = suggestion?.modes?.[0];
+  if (!mode) return null;
+  const flavor = resolveExportPhraseFlavor();
+  if (typeof LadTheory.suggestSoloPhrases !== "function") return null;
+  const pack = LadTheory.suggestSoloPhrases(item, mode, { flavor });
+  if (!pack?.slots?.length) return null;
+  const voice = typeof LadTheory.getVoice === "function" ? LadTheory.getVoice() : "plain";
+  const isPiano = exportInstrument() === "piano";
+  const phraseSlots = pack.slots.map((slot, i) => {
+    const grip = slots[i]?.voicing?.frets || null;
+    const prefer = typeof preferNeckCenter === "function" ? preferNeckCenter(grip) : 5;
+    const phrases = (slot.phrases || []).map((phrase) => {
+      const title =
+        typeof LadTheory.soloPhraseTitle === "function"
+          ? LadTheory.soloPhraseTitle(phrase, voice)
+          : phrase.titlePlain || "";
+      const why =
+        typeof LadTheory.soloPhraseWhy === "function"
+          ? LadTheory.soloPhraseWhy(phrase, voice)
+          : phrase.whyPlain || "";
+      const mapped =
+        !isPiano && typeof mapMelodyToNeck === "function"
+          ? mapMelodyToNeck(phrase.midis, { preferCenter: prefer })
+          : null;
+      return {
+        id: phrase.id,
+        title,
+        why,
+        notes: (phrase.notes || []).slice(),
+        midis: (phrase.midis || []).slice(),
+        mapped,
+      };
+    });
+    return {
+      index: slot.index,
+      symbol: slot.symbol,
+      voicing: slots[i]?.voicing || null,
+      phrases,
+    };
+  });
+  return {
+    title: "Соло · фразы",
+    modeId: pack.modeId,
+    modeName: voice === "pro" ? pack.modeNamePro : pack.modeNamePlain,
+    flavor: pack.flavor,
+    home: pack.home,
+    slots: phraseSlots,
+    isPiano,
+  };
+}
+
 function collectRiffExportData() {
   const instrument = exportInstrument();
   const instrumentLabel =
@@ -96,6 +168,7 @@ function collectRiffExportData() {
           },
         ]
       : [],
+    solo: collectSoloPhraseExport(slots, path),
     createdAt: new Date().toLocaleString("ru-RU", {
       year: "numeric",
       month: "long",
@@ -371,6 +444,118 @@ function wrapCanvasText(ctx, text, maxWidth) {
   return lines;
 }
 
+
+/** Numbered melody shape on the neck; returns used height. */
+function drawMelodyDiagram(ctx, originX, originY, mapped, caption) {
+  if (!mapped?.positions?.length) return 0;
+  const w = 108;
+  const h = 128;
+  const padL = 16;
+  const padR = 10;
+  const padT = 30;
+  const showFrets = 5;
+  const gridW = w - padL - padR;
+  const gridH = h - padT - 12;
+  const base = mapped.baseFret || 1;
+  const stringXs = [0, 1, 2, 3, 4, 5].map((i) => originX + padL + (gridW * i) / 5);
+  const rr = typeof roundRect === "function" ? roundRect : null;
+
+  ctx.fillStyle = "#fffdf8";
+  ctx.strokeStyle = "rgba(26,18,12,0.18)";
+  ctx.lineWidth = 1;
+  if (rr) {
+    rr(ctx, originX, originY, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(originX, originY, w, h);
+    ctx.strokeRect(originX, originY, w, h);
+  }
+
+  if (caption) {
+    ctx.fillStyle = "#1a120c";
+    ctx.font = "600 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(caption).slice(0, 22), originX + w / 2, originY + 14);
+    ctx.textAlign = "left";
+  }
+
+  if (base <= 1) {
+    ctx.fillStyle = "#b45a3c";
+    ctx.fillRect(originX + padL - 1, originY + padT - 3, gridW + 2, 3.5);
+  } else {
+    ctx.fillStyle = "#7a7166";
+    ctx.font = "500 9px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`${base}fr`, originX + padL - 5, originY + padT + gridH / 10 + 3);
+    ctx.textAlign = "left";
+  }
+
+  ctx.strokeStyle = "rgba(122,113,102,0.75)";
+  stringXs.forEach((x) => {
+    ctx.beginPath();
+    ctx.moveTo(x, originY + padT);
+    ctx.lineTo(x, originY + padT + gridH);
+    ctx.stroke();
+  });
+  for (let i = 0; i <= showFrets; i++) {
+    const y = originY + padT + (gridH * i) / showFrets;
+    ctx.beginPath();
+    ctx.moveTo(originX + padL, y);
+    ctx.lineTo(originX + padL + gridW, y);
+    ctx.stroke();
+  }
+
+  mapped.positions.forEach((pos) => {
+    const x = stringXs[pos.string];
+    if (pos.fret === 0) {
+      ctx.fillStyle = "#b45a3c";
+      ctx.beginPath();
+      ctx.arc(x, originY + padT - 11, 5.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fffdf8";
+      ctx.font = "700 9px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(pos.step), x, originY + padT - 7.5);
+      ctx.textAlign = "left";
+      return;
+    }
+    const rel = base <= 1 ? pos.fret : pos.fret - base + 1;
+    if (rel < 1 || rel > showFrets) return;
+    const y = originY + padT + ((rel - 0.5) * gridH) / showFrets;
+    ctx.fillStyle = "#b45a3c";
+    ctx.beginPath();
+    ctx.arc(x, y, 6.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fffdf8";
+    ctx.font = "700 9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(pos.step), x, y + 3.2);
+    ctx.textAlign = "left";
+  });
+  return h + 6;
+}
+
+function soloPhraseBlockHeight(solo, contentW, probe) {
+  if (!solo?.slots?.length) return 0;
+  let h = 36;
+  probe.font = "500 12px 'Source Sans 3', system-ui, sans-serif";
+  const wrap = typeof wrapCanvasText === "function" ? wrapCanvasText : null;
+  solo.slots.forEach((slot) => {
+    h += 26;
+    h += 140;
+    (slot.phrases || []).forEach((ph) => {
+      const noteLine = (ph.notes || []).join(" · ");
+      const text = `${ph.title}: ${noteLine}`;
+      const lines = wrap ? wrap(probe, text, contentW - 40) : [text];
+      h += 18 + lines.length * 14;
+      h += solo.isPiano ? 110 : 140;
+    });
+    h += 10;
+  });
+  return h + 12;
+}
+
 function drawSongExportCanvas(data) {
   const width = 794; // ~A4 @ 96dpi
   const margin = 48;
@@ -421,6 +606,16 @@ function drawSongExportCanvas(data) {
     });
     y += blockH + 14;
   });
+
+      if (data.solo?.slots?.length) {
+    y += 10;
+    layout.push({ type: "solo-heading", y });
+    y += 28;
+    probe.font = "500 12px 'Source Sans 3', system-ui, sans-serif";
+    const soloH = soloPhraseBlockHeight(data.solo, contentW, probe);
+    layout.push({ type: "solo", y, solo: data.solo, blockH: soloH });
+    y += soloH + 14;
+  }
 
   if (data.parts.length) {
     y += 8;
@@ -541,6 +736,75 @@ function drawSongExportCanvas(data) {
           else drawGuitarDiagram(ctx, dx, dy, diag.symbol, diag.voicing);
         });
       }
+    } else if (item.type === "solo-heading") {
+      ctx.fillStyle = "#1a120c";
+      ctx.font = "700 26px 'Cormorant Garamond', Georgia, serif";
+      ctx.fillText("Соло · фразы с аппликатурами", margin, item.y);
+    } else if (item.type === "solo") {
+      const solo = item.solo;
+      const top = item.y - 8;
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.strokeStyle = "rgba(26, 18, 12, 0.12)";
+      ctx.lineWidth = 1;
+      roundRect(ctx, margin, top, contentW, item.blockH, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      let sy = item.y + 8;
+      ctx.fillStyle = "#6e655a";
+      ctx.font = "500 13px 'Source Sans 3', system-ui, sans-serif";
+      const flavorLabel = solo.flavor === "spicy" ? "хитро" : "просто";
+      ctx.fillText(
+        `Лад: ${solo.modeName || "—"}${solo.home ? ` · центр ${solo.home}` : ""} · ${flavorLabel}`,
+        margin + 16,
+        sy
+      );
+      sy += 22;
+
+      solo.slots.forEach((slot) => {
+        ctx.fillStyle = "#d97835";
+        ctx.font = "700 12px 'Source Sans 3', system-ui, sans-serif";
+        ctx.fillText(`${slot.index + 1} · ${slot.symbol}`, margin + 16, sy);
+        sy += 8;
+
+        if (slot.voicing?.frets && !solo.isPiano) {
+          drawGuitarDiagram(ctx, margin + 16, sy, slot.symbol, slot.voicing);
+        } else if ((slot.voicing?.midis && slot.voicing.midis.length) || solo.isPiano) {
+          drawPianoDiagram(ctx, margin + 16, sy, {
+            symbol: slot.symbol,
+            midis: slot.voicing?.midis || [],
+            fingers: slot.voicing?.fingers || [],
+          });
+        }
+        sy += 130;
+
+        (slot.phrases || []).forEach((ph) => {
+          const noteLine = (ph.notes || []).join(" · ");
+          probe.font = "500 12px 'Source Sans 3', system-ui, sans-serif";
+          const lines = wrapCanvasText(probe, `${ph.title}: ${noteLine}`, contentW - 40);
+          lines.forEach((line) => {
+            ctx.font = "500 12px 'Source Sans 3', system-ui, sans-serif";
+            ctx.fillStyle = "#3f3832";
+            ctx.fillText(line, margin + 16, sy);
+            sy += 14;
+          });
+          sy += 4;
+          if (solo.isPiano) {
+            drawPianoDiagram(ctx, margin + 16, sy, {
+              symbol: ph.title,
+              midis: ph.midis || [],
+              fingers: (ph.midis || []).map((_, i) => i + 1),
+            });
+            sy += 108;
+          } else if (ph.mapped) {
+            const used = drawMelodyDiagram(ctx, margin + 16, sy, ph.mapped, "порядок нот");
+            sy += used + 8;
+          } else {
+            sy += 8;
+          }
+        });
+        sy += 8;
+      });
     } else if (item.type === "linear-title") {
       ctx.fillStyle = "#1a120c";
       ctx.font = "700 18px 'Cormorant Garamond', Georgia, serif";

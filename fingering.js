@@ -578,9 +578,168 @@ function renderScaleDiagrams(notes, opts = {}) {
   `;
 }
 
+
+/* ---------- Melody / phrase fingerings ---------- */
+
+const MELODY_OPEN_MIDI = [40, 45, 50, 55, 59, 64];
+
+function preferNeckCenter(frets) {
+  const played = (frets || []).filter((f) => f != null && f >= 0);
+  if (!played.length) return 5;
+  return Math.round(played.reduce((a, b) => a + b, 0) / played.length);
+}
+
+/** Разложить MIDI-фразу по грифу рядом с опорным хватом. */
+function mapMelodyToNeck(midis, opts = {}) {
+  const list = (midis || []).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n));
+  if (!list.length) return null;
+  const prefer = opts.preferCenter != null ? opts.preferCenter : 5;
+  const positions = [];
+  let lastString = 2;
+  let lastFret = prefer;
+  for (let i = 0; i < list.length; i++) {
+    const midi = list[i];
+    let best = null;
+    let bestCost = 1e9;
+    for (let s = 0; s < 6; s++) {
+      const fret = midi - MELODY_OPEN_MIDI[s];
+      if (fret < 0 || fret > 17) continue;
+      const cost =
+        Math.abs(fret - prefer) * 1.15 +
+        Math.abs(fret - lastFret) * 1.45 +
+        Math.abs(s - lastString) * 0.85 +
+        (fret === 0 ? -0.15 : 0);
+      if (cost < bestCost) {
+        bestCost = cost;
+        best = { string: s, fret, midi, step: i + 1 };
+      }
+    }
+    if (!best) continue;
+    positions.push(best);
+    lastString = best.string;
+    lastFret = best.fret;
+  }
+  if (!positions.length) return null;
+  const fretted = positions.map((p) => p.fret).filter((f) => f > 0);
+  const minF = fretted.length ? Math.min(...fretted) : 1;
+  const maxF = fretted.length ? Math.max(...fretted) : 1;
+  let baseFret = minF <= 1 && maxF <= 5 ? 1 : minF;
+  if (maxF - baseFret + 1 > 5) baseFret = Math.max(1, maxF - 4);
+  return { positions, baseFret, openMidi: MELODY_OPEN_MIDI.slice() };
+}
+
+function renderMelodyDiagramSvg(midis, opts = {}) {
+  const mapped = mapMelodyToNeck(midis, opts);
+  if (!mapped) return "";
+  const w = opts.width || 118;
+  const h = opts.height || 132;
+  const padL = 16;
+  const padR = 10;
+  const padT = 28;
+  const padB = 14;
+  const showFrets = 5;
+  const gridW = w - padL - padR;
+  const gridH = h - padT - padB;
+  const stringXs = [0, 1, 2, 3, 4, 5].map((i) => padL + (gridW * i) / 5);
+  const fretYs = [0, 1, 2, 3, 4, 5].map((i) => padT + (gridH * i) / 5);
+  const base = mapped.baseFret;
+  let marks = "";
+  if (base <= 1) {
+    marks += `<rect x="${padL - 1}" y="${padT - 3}" width="${gridW + 2}" height="3.5" fill="#f0a35a"/>`;
+  } else {
+    marks += `<text x="${padL - 5}" y="${padT + gridH / 10 + 3}" fill="#c9b59a" font-size="9" font-family="Source Sans 3,sans-serif" text-anchor="end">${base}fr</text>`;
+  }
+  for (const x of stringXs) {
+    marks += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT + gridH}" stroke="#f0a35a" stroke-width="1" opacity="0.45"/>`;
+  }
+  for (const y of fretYs) {
+    marks += `<line x1="${padL}" y1="${y}" x2="${padL + gridW}" y2="${y}" stroke="#f0a35a" stroke-width="1" opacity="0.35"/>`;
+  }
+  for (const pos of mapped.positions) {
+    const x = stringXs[pos.string];
+    if (pos.fret === 0) {
+      marks += `<circle cx="${x}" cy="${padT - 11}" r="5.2" fill="#f0a35a" stroke="#ffc078" stroke-width="1"/>`;
+      marks += `<text x="${x}" y="${padT - 8}" text-anchor="middle" fill="#1a120c" font-size="8" font-weight="700" font-family="Source Sans 3,sans-serif">${pos.step}</text>`;
+      continue;
+    }
+    const rel = base <= 1 ? pos.fret : pos.fret - base + 1;
+    if (rel < 1 || rel > showFrets) continue;
+    const y = padT + ((rel - 0.5) * gridH) / 5;
+    marks += `<circle cx="${x}" cy="${y}" r="6.2" fill="#f0a35a" stroke="#ffc078" stroke-width="1.1"/>`;
+    marks += `<text x="${x}" y="${y + 3.2}" text-anchor="middle" fill="#1a120c" font-size="8.5" font-weight="700" font-family="Source Sans 3,sans-serif">${pos.step}</text>`;
+  }
+  const title = (opts.title || "фраза").replace(/</g, "&lt;");
+  const cap = opts.caption
+    ? `<text x="${w / 2}" y="${h - 2}" text-anchor="middle" fill="#c9b59a" font-size="9" font-family="Source Sans 3,sans-serif">${opts.caption.replace(/</g, "&lt;")}</text>`
+    : "";
+  return `<figure class="melody-diag"><svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Аппликатура ${title}">${marks}${cap}</svg></figure>`;
+}
+
+function renderMelodyPianoSvg(midis, opts = {}) {
+  const list = (midis || []).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n));
+  if (!list.length) return "";
+  const isBlack = (m) => [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12);
+  const minM = Math.min(...list);
+  const maxM = Math.max(...list);
+  let start = minM - 1;
+  while (isBlack(start)) start--;
+  let end = maxM + 1;
+  while (isBlack(end)) end++;
+  const whites = [];
+  for (let m = start; m <= end; m++) if (!isBlack(m)) whites.push(m);
+  const whiteW = 14;
+  const padL = 6;
+  const padT = 22;
+  const whiteH = 48;
+  const blackH = 30;
+  const blackW = 9;
+  const w = Math.max(120, whites.length * whiteW + 14);
+  const h = 88;
+  const stepOf = {};
+  list.forEach((m, i) => {
+    if (stepOf[m] == null) stepOf[m] = i + 1;
+  });
+  let marks = "";
+  whites.forEach((m, i) => {
+    const x = padL + i * whiteW;
+    const on = stepOf[m] != null;
+    marks += `<rect x="${x}" y="${padT}" width="${whiteW - 1.2}" height="${whiteH}" rx="1.5" fill="${on ? "#f0a35a" : "#fff8ee"}" stroke="#3d2e22" stroke-width="1"/>`;
+    if (on) {
+      marks += `<text x="${x + (whiteW - 1.2) / 2}" y="${padT + whiteH - 8}" text-anchor="middle" fill="#1a120c" font-size="9" font-weight="700">${stepOf[m]}</text>`;
+    }
+  });
+  whites.forEach((m, i) => {
+    const nb = m + 1;
+    if (nb <= end && isBlack(nb)) {
+      const x = padL + i * whiteW + whiteW - blackW / 2 - 0.6;
+      const on = stepOf[nb] != null;
+      marks += `<rect x="${x}" y="${padT}" width="${blackW}" height="${blackH}" rx="1" fill="${on ? "#f0a35a" : "#1c1917"}" stroke="#0d0a08" stroke-width="0.5"/>`;
+      if (on) {
+        marks += `<text x="${x + blackW / 2}" y="${padT + blackH - 7}" text-anchor="middle" fill="#1a120c" font-size="8" font-weight="700">${stepOf[nb]}</text>`;
+      }
+    }
+  });
+  const title = (opts.title || "фраза").replace(/</g, "&lt;");
+  return `<figure class="melody-diag melody-diag--piano"><svg viewBox="0 0 ${w} ${h}" width="${Math.min(w, 220)}" height="${h}" role="img" aria-label="Аппликатура ${title}">${marks}</svg></figure>`;
+}
+
+function renderPhraseFingering(midis, opts = {}) {
+  const instrument =
+    opts.instrument ||
+    (typeof currentDiagramInstrument === "function" ? currentDiagramInstrument() : "guitar");
+  if (instrument === "piano") return renderMelodyPianoSvg(midis, opts);
+  return renderMelodyDiagramSvg(midis, opts);
+}
+
 if (typeof window !== "undefined") {
   window.refreshAllPathDiagrams = refreshAllPathDiagrams;
+  window.mapMelodyToNeck = mapMelodyToNeck;
+  window.preferNeckCenter = preferNeckCenter;
+  window.renderMelodyDiagramSvg = renderMelodyDiagramSvg;
+  window.renderMelodyPianoSvg = renderMelodyPianoSvg;
+  window.renderPhraseFingering = renderPhraseFingering;
 }
+
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
@@ -592,5 +751,10 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeQuality,
     splitChordSymbol,
     chordPitchClasses,
+    mapMelodyToNeck,
+    preferNeckCenter,
+    renderMelodyDiagramSvg,
+    renderMelodyPianoSvg,
+    renderPhraseFingering,
   };
 }
