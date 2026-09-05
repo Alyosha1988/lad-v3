@@ -661,12 +661,117 @@ function voicingStats() {
   };
 }
 
+
+/** Сдвиг по струнам: чем меньше, тем ближе аппликатура. */
+function fretShiftCost(a, b) {
+  if (!a || !b || a.length !== b.length) return 24;
+  let cost = 0;
+  for (let i = 0; i < a.length; i++) {
+    const fa = Number(a[i]);
+    const fb = Number(b[i]);
+    const ma = fa < 0 || Number.isNaN(fa);
+    const mb = fb < 0 || Number.isNaN(fb);
+    if (ma && mb) continue;
+    if (ma || mb) {
+      cost += 2.2;
+      continue;
+    }
+    cost += Math.abs(fa - fb);
+  }
+  return cost;
+}
+
+function midiCenter(midis) {
+  if (!midis?.length) return 60;
+  return midis.reduce((s, m) => s + m, 0) / midis.length;
+}
+
+/**
+ * Насколько постановка кандидата близка к опорной (хват в ходе).
+ * Меньше = лучше.
+ */
+function scoreVoicingNear(candidate, reference) {
+  if (!candidate) return 1e9;
+  if (!reference) return 0;
+  if (candidate.frets && reference.frets) {
+    const ca = candidate.baseFret || computeBaseFret(candidate.frets);
+    const ra = reference.baseFret || computeBaseFret(reference.frets);
+    let score = fretShiftCost(candidate.frets, reference.frets);
+    score += Math.abs(voicingCenter(candidate.frets) - voicingCenter(reference.frets)) * 1.35;
+    score += Math.abs(ca - ra) * 1.1;
+    if (candidate.form && reference.form && candidate.form === reference.form) score -= 5;
+    const ct = candidate.tags || [];
+    const rt = reference.tags || [];
+    if (ct.includes("barre") && rt.includes("barre")) score -= 1.5;
+    if (ct.includes("open") && rt.includes("open")) score -= 1.2;
+    if (ct.includes("compact") && rt.includes("compact")) score -= 1;
+    return score;
+  }
+  if (candidate.midis && reference.midis) {
+    let score = Math.abs(midiCenter(candidate.midis) - midiCenter(reference.midis));
+    const pcs = new Set(reference.midis.map((m) => ((m % 12) + 12) % 12));
+    const common = candidate.midis.filter((m) => pcs.has(((m % 12) + 12) % 12)).length;
+    score -= common * 1.4;
+    return score;
+  }
+  return 40;
+}
+
+/**
+ * Лучшая постановка символа рядом с опорным хватом.
+ * Инструмент берётся из опоры (гитара / фортепиано).
+ */
+function pickVoicingNear(symbol, reference, opts = {}) {
+  if (!symbol) return null;
+  const preferPiano = !!(
+    reference?.midis ||
+    reference?.instrument === "piano" ||
+    opts.instrument === "piano"
+  );
+  const list = preferPiano ? getPianoVoicings(symbol) : getGuitarVoicings(symbol);
+  if (!list.length) {
+    const alt = preferPiano ? getGuitarVoicings(symbol) : getPianoVoicings(symbol);
+    return alt[0] || null;
+  }
+  if (!reference) return list[0];
+  let best = list[0];
+  let bestScore = scoreVoicingNear(best, reference);
+  for (let i = 1; i < list.length; i++) {
+    const s = scoreVoicingNear(list[i], reference);
+    if (s < bestScore) {
+      best = list[i];
+      bestScore = s;
+    }
+  }
+  return best;
+}
+
+/** Цепочка постановок под символы, опираясь на предыдущий хват. */
+function pickVoicingChain(symbols, seedVoicing = null) {
+  const out = [];
+  let prev = seedVoicing || null;
+  for (const sym of symbols || []) {
+    const v =
+      pickVoicingNear(sym, prev) || {
+        name: "—",
+        frets: [FRET_MUTE, FRET_MUTE, FRET_MUTE, FRET_MUTE, FRET_MUTE, FRET_MUTE],
+        instrument: "guitar",
+      };
+    out.push(v);
+    prev = v;
+  }
+  return out;
+}
+
 if (typeof window !== "undefined") {
   window.LadVoicings = {
     getAllVoicings,
     getGuitarVoicings,
     getPianoVoicings,
     getVoicings,
+    pickVoicingNear,
+    pickVoicingChain,
+    scoreVoicingNear,
     listKnownQualities,
     listLibrarySymbols,
     chordPitchClasses,
@@ -691,6 +796,9 @@ if (typeof window !== "undefined") {
   window.computeBaseFret = computeBaseFret;
   window.getGuitarVoicings = getGuitarVoicings;
   window.getPianoVoicings = getPianoVoicings;
+  window.pickVoicingNear = pickVoicingNear;
+  window.pickVoicingChain = pickVoicingChain;
+  window.scoreVoicingNear = scoreVoicingNear;
   window.listKnownQualities = listKnownQualities;
   window.splitChordSymbol = splitChordSymbol;
   window.normalizeQuality = normalizeQuality;
@@ -708,6 +816,9 @@ if (typeof module !== "undefined" && module.exports) {
     getGuitarVoicings,
     getPianoVoicings,
     getVoicings,
+    pickVoicingNear,
+    pickVoicingChain,
+    scoreVoicingNear,
     listKnownQualities,
     listLibrarySymbols,
     chordPitchClasses,

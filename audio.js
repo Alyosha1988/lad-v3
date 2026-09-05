@@ -535,6 +535,7 @@ function scheduleVoicing(frets, when, opts = {}) {
   const jobs = ordered.map((n, i) => loadSample(instrument, n.midi, 100 - i));
   settleWithTimeout(jobs, opts.waitMs ?? 40).then((buffers) => {
     if (opts.loopGen != null && opts.loopGen !== loopGeneration) return;
+    if (opts.playGen != null && opts.playGen !== playGeneration) return;
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
     const startAt = Math.max(when, ctx.currentTime + 0.01);
     ordered.forEach((n, i) => {
@@ -559,6 +560,7 @@ function scheduleMidiChord(midis, when, opts = {}) {
   const jobs = midis.map((m, i) => loadSample(instrument, m, 100 - i));
   settleWithTimeout(jobs, opts.waitMs ?? 40).then((buffers) => {
     if (opts.loopGen != null && opts.loopGen !== loopGeneration) return;
+    if (opts.playGen != null && opts.playGen !== playGeneration) return;
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
     const startAt = Math.max(when, ctx.currentTime + 0.01);
     midis.forEach((m, i) => {
@@ -786,8 +788,39 @@ if (typeof document !== "undefined") {
   }
 }
 
+
+/**
+ * Проиграть последовательность постановок (ход + кандидат).
+ * items: [{ frets } | { midis }, ...]
+ */
+function playVoicingSequence(items, opts = {}) {
+  const ctx = unlockAudio();
+  if (!ctx || !items?.length) return false;
+  const gap = opts.gapSec ?? 0.9;
+  const gen = ++playGeneration;
+  const instrument = opts.instrument || currentInstrument;
+  const style = instrumentPlayStyle(instrument);
+  const start = ctx.currentTime + 0.05;
+  const duration = opts.duration ?? Math.min(style.duration * 0.85, gap * 0.92);
+  const common = {
+    instrument,
+    duration,
+    gain: opts.gain ?? style.gain,
+    waitMs: opts.waitMs ?? 80,
+    playGen: gen,
+  };
+  items.forEach((item, i) => {
+    if (!item) return;
+    const when = start + i * gap;
+    if (item.frets) scheduleVoicing(item.frets, when, { ...common });
+    else if (item.midis?.length) scheduleMidiChord(item.midis, when, { ...common });
+  });
+  return true;
+}
+
 const LadAudioAPI = {
   playVoicing,
+  playVoicingSequence,
   playChord,
   playMidiNotes,
   playMelody,

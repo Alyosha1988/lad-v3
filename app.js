@@ -1142,7 +1142,85 @@ function buildIdeas() {
     });
   }
 
+  const ref = lastPathVoicing();
+  next.forEach((idea) => {
+    idea.voicing = voicingForSymbol(idea.symbol, ref);
+  });
+
   return { next: next.slice(0, 8), rest: rest.slice(0, 16) };
+}
+
+
+function lastPathVoicing() {
+  const last = state.slots[state.slots.length - 1];
+  return last?.voicing || null;
+}
+
+function fallbackVoicing(symbol) {
+  if (typeof getGuitarVoicings === "function") {
+    const list = getGuitarVoicings(symbol);
+    if (list?.length) return list[0];
+  }
+  return { name: "—", frets: emptyFrets(), instrument: "guitar" };
+}
+
+/** Постановка символа рядом с хватом хода (или дефолт). */
+function voicingForSymbol(symbol, reference = lastPathVoicing()) {
+  if (!symbol) return fallbackVoicing("");
+  if (typeof pickVoicingNear === "function") {
+    return pickVoicingNear(symbol, reference) || fallbackVoicing(symbol);
+  }
+  return fallbackVoicing(symbol);
+}
+
+function cloneVoicing(v) {
+  if (!v) return null;
+  return {
+    ...v,
+    frets: v.frets ? v.frets.slice() : undefined,
+    midis: v.midis ? v.midis.slice() : undefined,
+    tags: v.tags ? [...v.tags] : undefined,
+  };
+}
+
+/** Прослушать текущий ход + опционально следующий хват. */
+function playPathWithExtra(extraVoicing) {
+  if (typeof stopRiffLoopUi === "function") stopRiffLoopUi();
+  const audio = typeof LadAudio !== "undefined" ? LadAudio : null;
+  if (!audio?.playVoicingSequence) {
+    flash("Звук пока недоступен.");
+    return false;
+  }
+  const items = state.slots
+    .map((s) => s.voicing)
+    .filter(Boolean)
+    .map((v) => (v.frets ? { frets: v.frets } : v.midis ? { midis: v.midis } : null))
+    .filter(Boolean);
+  if (extraVoicing?.frets) items.push({ frets: extraVoicing.frets });
+  else if (extraVoicing?.midis) items.push({ midis: extraVoicing.midis });
+  if (!items.length) return false;
+  const tempo = state.loop?.tempo || 90;
+  const gap = Math.max(0.65, Math.min(1.15, 60 / tempo));
+  audio.unlockAudio?.();
+  return audio.playVoicingSequence(items, { gapSec: gap });
+}
+
+function playSymbolPathPreview(symbols, seed = lastPathVoicing()) {
+  if (typeof stopRiffLoopUi === "function") stopRiffLoopUi();
+  const audio = typeof LadAudio !== "undefined" ? LadAudio : null;
+  if (!audio?.playVoicingSequence) return false;
+  const chain =
+    typeof pickVoicingChain === "function"
+      ? pickVoicingChain(symbols, seed)
+      : (symbols || []).map((sym) => voicingForSymbol(sym, seed));
+  const items = chain
+    .map((v) => (v?.frets ? { frets: v.frets } : v?.midis ? { midis: v.midis } : null))
+    .filter(Boolean);
+  if (!items.length) return false;
+  const tempo = state.loop?.tempo || 90;
+  const gap = Math.max(0.65, Math.min(1.15, 60 / tempo));
+  audio.unlockAudio?.();
+  return audio.playVoicingSequence(items, { gapSec: gap });
 }
 
 function renderNextChordBlock(nextIdeas, key) {
@@ -1150,22 +1228,36 @@ function renderNextChordBlock(nextIdeas, key) {
   const keyHint = key
     ? `${key.tonic}${key.mode === "minor" ? "m" : key.mode === "mixo" ? "7" : ""}`
     : pathSymbols()[0] || "";
+  const ref = lastPathVoicing();
   const cards = nextIdeas
-    .map(
-      (idea) => `
+    .map((idea) => {
+      const v = idea.voicing || voicingForSymbol(idea.symbol, ref);
+      const diag =
+        v && typeof renderChordSvg === "function"
+          ? renderChordSvg(idea.symbol, v, { width: 92, height: 118 })
+          : "";
+      const fretAttr = v?.frets ? ` data-preview-frets="${v.frets.join(",")}"` : "";
+      const midiAttr = v?.midis ? ` data-preview-midis="${v.midis.join(",")}"` : "";
+      const gripHint = v?.name ? `<p class="next-chord-card__grip">${v.name}</p>` : "";
+      return `
       <article class="next-chord-card">
         <p class="next-chord-card__role">${idea.role || "далее"}</p>
         <h3 class="next-chord-card__sym">${idea.symbol}</h3>
         <p class="next-chord-card__why">${idea.why}</p>
-        <button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">В ход</button>
-      </article>`
-    )
+        ${gripHint}
+        <div class="next-chord-card__diag">${diag}</div>
+        <div class="next-chord-card__actions">
+          <button type="button" class="btn btn-ghost btn-tiny" data-preview-with-path${fretAttr}${midiAttr}>▶ с ходом</button>
+          <button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">В ход</button>
+        </div>
+      </article>`;
+    })
     .join("");
   return `
     <section class="next-chord-block" aria-label="Следующий аккорд">
       <div class="next-chord-block__head">
         <p class="kicker">Следующий аккорд</p>
-        <p class="hand-note">По функции в тональности ${keyHint} · один шаг от текущего</p>
+        <p class="hand-note">По функции в тональности ${keyHint} · постановка рядом с вашим хватом · один шаг</p>
       </div>
       <div class="next-chord-grid">${cards}</div>
     </section>`;
@@ -1195,17 +1287,20 @@ function renderIdeaCard(idea) {
       <div class="actions">
         ${
           idea.addSymbol
-            ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">Добавить в ход</button>`
+            ? `<button type="button" class="btn btn-ghost btn-tiny" data-preview-with-path data-preview-symbol="${idea.addSymbol}">▶ с ходом</button>
+               <button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">Добавить в ход</button>`
             : ""
         }
         ${
           idea.setPath
-            ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-set="${idea.setPath.join("|")}">Поставить ход</button>`
+            ? `<button type="button" class="btn btn-ghost btn-tiny" data-preview-path="${idea.setPath.join("|")}">▶ ход</button>
+               <button type="button" class="btn btn-glow btn-tiny" data-idea-set="${idea.setPath.join("|")}">Поставить ход</button>`
             : ""
         }
         ${
           idea.appendSymbols?.length
-            ? `<button type="button" class="btn btn-ghost btn-tiny" data-idea-append="${idea.appendSymbols.join("|")}">Добавить хвост</button>`
+            ? `<button type="button" class="btn btn-ghost btn-tiny" data-preview-path="${[...pathSymbols(), ...idea.appendSymbols].join("|")}">▶ с ходом</button>
+               <button type="button" class="btn btn-ghost btn-tiny" data-idea-append="${idea.appendSymbols.join("|")}">Добавить хвост</button>`
             : ""
         }
         ${
@@ -1230,22 +1325,23 @@ function renderIdeaCard(idea) {
 function applyIdeaPath(symbols) {
   const list = (symbols || []).filter(Boolean);
   if (!list.length) return;
-  state.slots = list.map((sym) => {
-    const v =
-      typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym)[0] : null;
-    return {
-      id: uid(),
-      symbol: sym,
-      voicing: v || { name: "—", frets: emptyFrets(), instrument: "guitar" },
-    };
+  const seed = lastPathVoicing();
+  const chain =
+    typeof pickVoicingChain === "function"
+      ? pickVoicingChain(list, seed)
+      : list.map((sym, i) => voicingForSymbol(sym, i ? null : seed));
+  let prev = seed;
+  state.slots = list.map((sym, i) => {
+    const v = cloneVoicing(chain[i] || voicingForSymbol(sym, prev)) || fallbackVoicing(sym);
+    prev = v;
+    return { id: uid(), symbol: sym, voicing: v };
   });
 }
 
 function appendIdeaSymbols(symbols) {
   (symbols || []).forEach((sym) => {
-    const v =
-      typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym)[0] : null;
-    addSlot(sym, v || { name: "—", frets: emptyFrets(), instrument: "guitar" });
+    const v = cloneVoicing(voicingForSymbol(sym, lastPathVoicing())) || fallbackVoicing(sym);
+    addSlot(sym, v);
   });
 }
 
@@ -1326,11 +1422,34 @@ function renderDevelop() {
     });
   });
 
+  stage.querySelectorAll("[data-preview-with-path]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      let extra = null;
+      if (btn.dataset.previewFrets) {
+        extra = { frets: btn.dataset.previewFrets.split(",").map((n) => parseInt(n, 10)) };
+      } else if (btn.dataset.previewMidis) {
+        extra = { midis: btn.dataset.previewMidis.split(",").map((n) => parseInt(n, 10)) };
+      } else if (btn.dataset.previewSymbol) {
+        extra = voicingForSymbol(btn.dataset.previewSymbol, lastPathVoicing());
+      }
+      playPathWithExtra(extra);
+    });
+  });
+  stage.querySelectorAll("[data-preview-path]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const syms = (btn.dataset.previewPath || "").split("|").filter(Boolean);
+      playSymbolPathPreview(syms, lastPathVoicing());
+    });
+  });
   stage.querySelectorAll("[data-idea-add]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const sym = btn.dataset.ideaAdd;
-      const v = typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym)[0] : null;
-      addSlot(sym, v || { name: "default", frets: emptyFrets(), instrument: "guitar" });
+      const v = cloneVoicing(voicingForSymbol(sym, lastPathVoicing())) || fallbackVoicing(sym);
+      addSlot(sym, v);
       setScreen("path");
     });
   });
@@ -1339,9 +1458,9 @@ function renderDevelop() {
       const sym = btn.dataset.ideaReplace;
       const last = state.slots[state.slots.length - 1];
       if (!last) return;
-      const v = typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym)[0] : last.voicing;
+      const prev = state.slots[state.slots.length - 2]?.voicing || last.voicing;
       last.symbol = sym;
-      last.voicing = v;
+      last.voicing = cloneVoicing(voicingForSymbol(sym, prev)) || last.voicing;
       setScreen("path");
     });
   });
