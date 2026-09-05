@@ -1995,6 +1995,45 @@ button[data-open-degrees].btn-glow {
   gap: 0.35rem;
   margin-top: 0.45rem;
 }
+.next-chord-block {
+  margin: 0.85rem 0 1.1rem;
+}
+.next-chord-block__head {
+  margin-bottom: 0.55rem;
+}
+.next-chord-block__head .kicker {
+  margin-bottom: 0.15rem;
+}
+.next-chord-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.55rem;
+}
+.next-chord-card {
+  padding: 0.7rem 0.75rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: linear-gradient(165deg, rgba(42, 28, 18, 0.85), rgba(16, 12, 10, 0.72));
+}
+.next-chord-card__role {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.next-chord-card__sym {
+  margin: 0.2rem 0 0.25rem;
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+.next-chord-card__why {
+  margin: 0 0 0.55rem;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
 .idea-list { display: grid; gap: 0.75rem; }
 .idea-card {
   padding: 0.9rem;

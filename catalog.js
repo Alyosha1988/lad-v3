@@ -687,6 +687,7 @@ if (typeof window !== "undefined") {
     STYLES,
     parseChord,
     guessKey,
+    degreeMap,
     buildCatalog,
     progressionsFor,
     melodyFor,
@@ -697,6 +698,7 @@ if (typeof window !== "undefined") {
   window.progressionsFor = progressionsFor;
   window.parseChord = parseChord;
   window.guessKey = guessKey;
+  window.degreeMap = degreeMap;
   window.buildCatalog = buildCatalog;
 }
 
@@ -709,6 +711,7 @@ if (typeof module !== "undefined" && module.exports) {
     STYLES,
     parseChord,
     guessKey,
+    degreeMap,
     buildCatalog,
     progressionsFor,
     melodyFor,

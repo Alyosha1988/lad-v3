@@ -957,6 +957,76 @@ function symbolsMatch(a, b) {
   return String(a || "").replace(/\s/g, "") === String(b || "").replace(/\s/g, "");
 }
 
+function pathKeyCenter() {
+  const start = pathSymbols()[0];
+  if (!start || typeof parseChord !== "function" || typeof guessKey !== "function") {
+    return { symbol: start || "", key: null, degrees: null };
+  }
+  const parsed = parseChord(start);
+  if (!parsed) return { symbol: start, key: null, degrees: null };
+  const key = guessKey(parsed);
+  const degrees = typeof degreeMap === "function" ? degreeMap(key) : null;
+  return { symbol: start, key, degrees };
+}
+
+/**
+ * Следующие аккорды по функции в тональности хода (не целые обороты).
+ * Центр — первый аккорд пути.
+ */
+function buildFunctionalNextChords(path) {
+  if (!path?.length) return [];
+  const last = path[path.length - 1];
+  const { key, degrees: d } = pathKeyCenter();
+  if (!key || !d) return [];
+
+  const isMin = key.mode === "minor";
+  const roles = isMin
+    ? [
+        { deg: "V7", role: "доминанта", why: "Острая тяга обратно к тонике." },
+        { deg: "iv", role: "субдоминанта", why: "Плагальный шаг внутрь минора." },
+        { deg: "bVII", role: "bVII", why: "Светлый aeolian / рок-шаг." },
+        { deg: "bVI", role: "bVI", why: "Тёмная краска — часто перед bVII или V." },
+        { deg: "bIII", role: "bIII", why: "Родственный мажор: мягкий свет." },
+        { deg: "iim7b5", role: "iiø", why: "Подготовка к доминанте (ii–V)." },
+        { deg: "v", role: "v минор", why: "Мягкая доминанта без острого V7." },
+        { deg: "IV", role: "IV мажор", why: "Дорийский свет поверх минора." },
+        { deg: "II7", role: "V/V", why: "Вторичная доминанта к V." },
+        { deg: "i", role: "тоника", why: "Возврат домой." },
+      ]
+    : [
+        { deg: "V", role: "доминанта", why: "Классическая тяга к I." },
+        { deg: "V7", role: "доминанта 7", why: "Сильнее тянет к тонике." },
+        { deg: "IV", role: "субдоминанта", why: "Плагальный шаг, открытый воздух." },
+        { deg: "vi", role: "vi", why: "Относительный минор — тень без смены тональности." },
+        { deg: "ii", role: "ii", why: "Подготовка к V (ii–V–I)." },
+        { deg: "iii", role: "iii", why: "Мягкий подъём без драмы." },
+        { deg: "bVII", role: "bVII", why: "Миксолидийский / рок-заимствование." },
+        { deg: "V7ofV", role: "V/V", why: "Вторичная доминанта к V." },
+        { deg: "V7ofvi", role: "V/vi", why: "Вторичная доминанта к относительному минору." },
+        { deg: "I", role: "тоника", why: "Возврат домой." },
+      ];
+
+  const out = [];
+  const seen = new Set();
+  for (const r of roles) {
+    const sym = d[r.deg];
+    if (!sym || symbolsMatch(sym, last) || seen.has(sym)) continue;
+    seen.add(sym);
+    out.push({
+      kind: "next",
+      symbol: sym,
+      role: r.role,
+      title: `Далее → ${sym}`,
+      why: `${r.role}: ${r.why}`,
+      path: path.concat(sym),
+      addSymbol: sym,
+      degree: r.deg,
+    });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
 function nextChordsFromCatalog(last, catalogIdeas) {
   const found = [];
   const seen = new Set();
@@ -976,34 +1046,43 @@ function nextChordsFromCatalog(last, catalogIdeas) {
 
 function buildIdeas() {
   const path = pathSymbols();
-  if (!path.length) return [];
-  const ideas = [];
+  if (!path.length) return { next: [], rest: [] };
   const last = path[path.length - 1];
   const first = path[0];
   const { key, ideas: catalog, mood } = fetchCatalogIdeas();
 
-  // 1) быстрые «следующие» из каталога Песни
-  nextChordsFromCatalog(last, catalog).forEach((n) => {
-    ideas.push({
-      kind: "continue",
-      title: `Продолжить → ${n.symbol}`,
-      why: n.why || `Частый шаг после ${last} в каталоге Песни.`,
-      path: path.concat(n.symbol),
-      addSymbol: n.symbol,
-    });
-  });
+  // 1) функциональные «следующие аккорды» — отдельный блок
+  const next = buildFunctionalNextChords(path);
 
-  // 2) готовые ходы из каталога (тот же источник, что в Песне)
+  // дополнение из каталога, если функция дала мало
+  if (next.length < 5) {
+    const have = new Set(next.map((n) => n.symbol));
+    nextChordsFromCatalog(last, catalog).forEach((n) => {
+      if (have.has(n.symbol) || symbolsMatch(n.symbol, last)) return;
+      have.add(n.symbol);
+      next.push({
+        kind: "next",
+        symbol: n.symbol,
+        role: "из каталога",
+        title: `Далее → ${n.symbol}`,
+        why: n.why || `Частый шаг после ${last} в каталоге Песни.`,
+        path: path.concat(n.symbol),
+        addSymbol: n.symbol,
+      });
+    });
+  }
+
+  const rest = [];
+
+  // 2) готовые ходы из каталога Песни
   const pathKey = path.join("→");
   catalog.slice(0, 14).forEach((idea) => {
     const ideaPath = idea.path || [];
     if (!ideaPath.length) return;
     if (ideaPath.join("→") === pathKey) return;
     const canAppend =
-      ideaPath.length > 1 && symbolsMatch(ideaPath[0], last)
-        ? ideaPath.slice(1)
-        : null;
-    ideas.push({
+      ideaPath.length > 1 && symbolsMatch(ideaPath[0], last) ? ideaPath.slice(1) : null;
+    rest.push({
       kind: "catalog",
       title: idea.kind,
       why: [idea.family, idea.why].filter(Boolean).join(" · "),
@@ -1017,12 +1096,12 @@ function buildIdeas() {
     });
   });
 
-  // 3) другие постановки текущего хода
+  // 3) другие постановки
   const uniq = [...new Set(path)];
   uniq.forEach((sym) => {
     const vs = typeof getGuitarVoicings === "function" ? getGuitarVoicings(sym) : [];
     if (vs.length > 1) {
-      ideas.push({
+      rest.push({
         kind: "voicing",
         title: `Другие постановки ${sym}`,
         why: `${vs.length} вариантов в базе — смените хват, не меняя гармонию.`,
@@ -1033,10 +1112,10 @@ function buildIdeas() {
     }
   });
 
-  // 4) родственная замена последнего
+  // 4) родственная замена
   const subs = { G: "Em", Em: "G", C: "Am", Am: "C", F: "Dm", Dm: "F", D: "Bm", A: "F#m", E: "C#m", B: "G#m" };
   if (subs[last]) {
-    ideas.push({
+    rest.push({
       kind: "swap",
       title: `Заменить ${last} → ${subs[last]}`,
       why: "Родственная замена: мягче или светлее при том же каркасе.",
@@ -1047,7 +1126,7 @@ function buildIdeas() {
 
   // 5) петля
   if (path.length === 1) {
-    ideas.push({
+    rest.push({
       kind: "vamp",
       title: `Вамп ${first}–${first}`,
       why: "Держите один аккорд петлёй — удобно под соло и рифф.",
@@ -1055,7 +1134,7 @@ function buildIdeas() {
     });
   } else if (path.length >= 2) {
     const loop = path.slice(0, 2);
-    ideas.push({
+    rest.push({
       kind: "vamp",
       title: `Петля ${loop.join("–")}`,
       why: "Короткий рифф из первых двух звеньев — основа под куплет или соло.",
@@ -1063,7 +1142,89 @@ function buildIdeas() {
     });
   }
 
-  return ideas.slice(0, 22);
+  return { next: next.slice(0, 8), rest: rest.slice(0, 16) };
+}
+
+function renderNextChordBlock(nextIdeas, key) {
+  if (!nextIdeas?.length) return "";
+  const keyHint = key
+    ? `${key.tonic}${key.mode === "minor" ? "m" : key.mode === "mixo" ? "7" : ""}`
+    : pathSymbols()[0] || "";
+  const cards = nextIdeas
+    .map(
+      (idea) => `
+      <article class="next-chord-card">
+        <p class="next-chord-card__role">${idea.role || "далее"}</p>
+        <h3 class="next-chord-card__sym">${idea.symbol}</h3>
+        <p class="next-chord-card__why">${idea.why}</p>
+        <button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">В ход</button>
+      </article>`
+    )
+    .join("");
+  return `
+    <section class="next-chord-block" aria-label="Следующий аккорд">
+      <div class="next-chord-block__head">
+        <p class="kicker">Следующий аккорд</p>
+        <p class="hand-note">По функции в тональности ${keyHint} · один шаг от текущего</p>
+      </div>
+      <div class="next-chord-grid">${cards}</div>
+    </section>`;
+}
+
+function renderIdeaCard(idea) {
+  let extra = "";
+  if (idea.voicings) {
+    extra = `<div class="voicing-strip">${idea.voicings
+      .map((v) => renderChordSvg(idea.focusSymbol, v, { width: 84, height: 110 }))
+      .join("")}</div>`;
+  } else {
+    extra = `<p class="idea-path">${idea.path.join(" → ")}</p>`;
+  }
+  const kindLabel =
+    idea.kind === "catalog"
+      ? idea.family || "каталог"
+      : idea.kind === "continue" || idea.kind === "next"
+        ? "далее"
+        : idea.kind;
+  return `
+    <article class="idea-card">
+      <p class="idea-card__kind">${kindLabel}</p>
+      <h3 class="idea-card__title">${idea.title}</h3>
+      <p class="idea-card__why">${idea.why}</p>
+      ${extra}
+      <div class="actions">
+        ${
+          idea.addSymbol
+            ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">Добавить в ход</button>`
+            : ""
+        }
+        ${
+          idea.setPath
+            ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-set="${idea.setPath.join("|")}">Поставить ход</button>`
+            : ""
+        }
+        ${
+          idea.appendSymbols?.length
+            ? `<button type="button" class="btn btn-ghost btn-tiny" data-idea-append="${idea.appendSymbols.join("|")}">Добавить хвост</button>`
+            : ""
+        }
+        ${
+          idea.replaceLast
+            ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-replace="${idea.replaceLast}">Применить замену</button>`
+            : ""
+        }
+        ${
+          idea.kind === "vamp"
+            ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-set="${idea.path.join("|")}">Поставить петлю</button>`
+            : ""
+        }
+        ${
+          idea.focusSymbol
+            ? `<button type="button" class="btn btn-ghost btn-tiny" data-idea-focus="${idea.focusSymbol}">К постановкам</button>`
+            : ""
+        }
+      </div>
+    </article>`;
 }
 
 function applyIdeaPath(symbols) {
@@ -1110,73 +1271,20 @@ function renderDevelop() {
     setScreen("fret");
     return;
   }
-  const ideas = buildIdeas();
+  const { next, rest } = buildIdeas();
   const route = pathSymbols().join(" → ");
-  const { key } = fetchCatalogIdeas();
-  const keyHint = key ? ` · тональность ${key.tonic}${key.mode === "minor" ? "m" : ""}` : "";
+  const { key } = pathKeyCenter();
+  const keyHint = key
+    ? ` · тональность ${key.tonic}${key.mode === "minor" ? "m" : key.mode === "mixo" ? "7" : ""}`
+    : "";
 
-  const blocks = ideas
-    .map((idea) => {
-      let extra = "";
-      if (idea.voicings) {
-        extra = `<div class="voicing-strip">${idea.voicings
-          .map((v) => renderChordSvg(idea.focusSymbol, v, { width: 84, height: 110 }))
-          .join("")}</div>`;
-      } else {
-        extra = `<p class="idea-path">${idea.path.join(" → ")}</p>`;
-      }
-      const kindLabel =
-        idea.kind === "catalog"
-          ? idea.family || "каталог"
-          : idea.kind === "continue"
-            ? "далее"
-            : idea.kind;
-      return `
-        <article class="idea-card">
-          <p class="idea-card__kind">${kindLabel}</p>
-          <h3 class="idea-card__title">${idea.title}</h3>
-          <p class="idea-card__why">${idea.why}</p>
-          ${extra}
-          <div class="actions">
-            ${
-              idea.addSymbol
-                ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-add="${idea.addSymbol}">Добавить в ход</button>`
-                : ""
-            }
-            ${
-              idea.setPath
-                ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-set="${idea.setPath.join("|")}">Поставить ход</button>`
-                : ""
-            }
-            ${
-              idea.appendSymbols?.length
-                ? `<button type="button" class="btn btn-ghost btn-tiny" data-idea-append="${idea.appendSymbols.join("|")}">Добавить хвост</button>`
-                : ""
-            }
-            ${
-              idea.replaceLast
-                ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-replace="${idea.replaceLast}">Применить замену</button>`
-                : ""
-            }
-            ${
-              idea.kind === "vamp"
-                ? `<button type="button" class="btn btn-glow btn-tiny" data-idea-set="${idea.path.join("|")}">Поставить петлю</button>`
-                : ""
-            }
-            ${
-              idea.focusSymbol
-                ? `<button type="button" class="btn btn-ghost btn-tiny" data-idea-focus="${idea.focusSymbol}">К постановкам</button>`
-                : ""
-            }
-          </div>
-        </article>`;
-    })
-    .join("");
+  const blocks = rest.map(renderIdeaCard).join("");
 
   stage.innerHTML = `
     <p class="kicker">Развитие</p>
     <h1 class="h1">Идеи вокруг хода</h1>
     <p class="hand-note">${route}${keyHint}</p>
+    ${renderNextChordBlock(next, key)}
     ${renderDevelopMoodChips()}
     <div class="idea-list">${blocks || "<p class='hand-note'>Добавьте аккорд — появятся идеи.</p>"}</div>
     <div class="actions sticky-actions">
