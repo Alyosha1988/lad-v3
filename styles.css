@@ -1769,6 +1769,75 @@ button[data-open-degrees].btn-glow {
 .song-part-actions {
   margin-top: 0.45rem;
 }
+
+.solo-phrases {
+  margin: 1.1rem 0 0.5rem;
+  padding: 1rem 1rem 1.05rem;
+  border-radius: 18px;
+  border: 1px solid rgba(240, 163, 90, 0.22);
+  background:
+    linear-gradient(165deg, rgba(36, 24, 16, 0.7), rgba(12, 9, 7, 0.55)),
+    rgba(16, 12, 10, 0.78);
+}
+.solo-phrases__title {
+  margin: 0.1rem 0 0.35rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.45rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.solo-phrase-flavor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.55rem 0 0.85rem;
+}
+.solo-phrase-slots {
+  display: grid;
+  gap: 0.85rem;
+}
+.solo-phrase-slot__title {
+  margin: 0 0 0.4rem;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.solo-phrase-slot__list {
+  display: grid;
+  gap: 0.55rem;
+}
+.solo-phrase {
+  padding: 0.7rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(10, 8, 6, 0.45);
+}
+.solo-phrase__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.solo-phrase__title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.solo-phrase__notes {
+  margin: 0.35rem 0 0.2rem;
+  font-size: 0.9rem;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+.solo-phrase__why {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-mute);
+}
+
 .solo-mode__tools {
   display: flex;
   flex-wrap: wrap;

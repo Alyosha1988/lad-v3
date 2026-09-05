@@ -638,7 +638,12 @@ function handlePlayEvent(e) {
   flashPlaying(playBtn);
   try {
     if (playBtn.dataset.playMelody) {
-      playMelody(playBtn.dataset.playMelody.split(",").map((n) => parseInt(n, 10)));
+      const gapRaw = playBtn.dataset.melodyGap;
+      const gapMs = gapRaw != null && gapRaw !== "" ? parseInt(gapRaw, 10) : NaN;
+      playMelody(
+        playBtn.dataset.playMelody.split(",").map((n) => parseInt(n, 10)),
+        Number.isFinite(gapMs) ? { gapMs } : {}
+      );
     } else if (playBtn.dataset.playNotes) {
       playMidiNotes(playBtn.dataset.playNotes.split(",").map((n) => parseInt(n, 10)));
     } else if (playBtn.dataset.playFrets) {

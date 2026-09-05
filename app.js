@@ -23,6 +23,9 @@ const state = {
   dragFrom: null,
   pdfPreview: false,
   soloBoxesModeId: null,
+  /** @type {"simple"|"spicy"} */
+  soloPhraseFlavor:
+    (typeof localStorage !== "undefined" && localStorage.getItem("lad-riff-solo-phrase-flavor")) || "simple",
   developMood: null, // null = авто по первому аккорду
   /** @type {"simple"|"spicy"|"both"} */
   nextFlavor: (typeof localStorage !== "undefined" && localStorage.getItem("lad-riff-next-flavor")) || "both",
@@ -264,7 +267,9 @@ function bindMelodyPlayButtons(root) {
         .filter((n) => Number.isFinite(n));
       if (!midis.length) return;
       LadAudio.unlockAudio?.();
-      LadAudio.playMelody?.(midis);
+      const gapRaw = btn.dataset.melodyGap;
+      const gapMs = gapRaw != null && gapRaw !== "" ? parseInt(gapRaw, 10) : NaN;
+      LadAudio.playMelody?.(midis, Number.isFinite(gapMs) ? { gapMs } : {});
     };
     btn.addEventListener("pointerup", play);
     btn.addEventListener("click", play);
@@ -1097,6 +1102,75 @@ function setNextFlavor(id) {
   } catch (_) {}
 }
 
+const SOLO_PHRASE_FLAVOR_KEY = "lad-riff-solo-phrase-flavor";
+
+function resolveSoloPhraseFlavor() {
+  return state.soloPhraseFlavor === "spicy" ? "spicy" : "simple";
+}
+
+function setSoloPhraseFlavor(id) {
+  const v = id === "spicy" ? "spicy" : "simple";
+  state.soloPhraseFlavor = v;
+  try {
+    localStorage.setItem(SOLO_PHRASE_FLAVOR_KEY, v);
+  } catch (_) {}
+}
+
+function renderSoloPhrasesBlock(suggestion, voice) {
+  const top = suggestion?.modes?.[0];
+  if (!top || typeof LadTheory === "undefined" || typeof LadTheory.suggestSoloPhrases !== "function") {
+    return "";
+  }
+  const item = riffSoloItem();
+  if (!item) return "";
+  const flavor = resolveSoloPhraseFlavor();
+  const pack = LadTheory.suggestSoloPhrases(item, top, { flavor });
+  if (!pack?.slots?.length) return "";
+  const modeTitle =
+    voice === "pro" ? pack.modeNamePro || top.namePro : pack.modeNamePlain || top.namePlain;
+  const slotsHtml = pack.slots
+    .map((slot) => {
+      const phrasesHtml = (slot.phrases || [])
+        .map((phrase, pi) => {
+          const title = LadTheory.soloPhraseTitle(phrase, voice);
+          const why = LadTheory.soloPhraseWhy(phrase, voice);
+          const notes = (phrase.notes || []).join(" · ");
+          const midis = (phrase.midis || []).join(",");
+          return `
+            <article class="solo-phrase">
+              <div class="solo-phrase__head">
+                <h4 class="solo-phrase__title">${title}</h4>
+                <button type="button" class="btn btn-glow btn-tiny" data-play-melody="${midis}" aria-label="Проиграть фразу">▶ Фраза</button>
+              </div>
+              <p class="solo-phrase__notes">${notes}</p>
+              <p class="solo-phrase__why">${why}</p>
+            </article>`;
+        })
+        .join("");
+      return `
+        <div class="solo-phrase-slot">
+          <h3 class="solo-phrase-slot__title">${slot.index + 1} · ${slot.symbol}</h3>
+          <div class="solo-phrase-slot__list">${phrasesHtml}</div>
+        </div>`;
+    })
+    .join("");
+  const pathMidis = (pack.pathMidis || []).join(",");
+  const pathBtn = pathMidis
+    ? `<button type="button" class="btn btn-glow btn-tiny" data-play-melody="${pathMidis}" data-melody-gap="200" aria-label="Проиграть весь ход">▶ Весь ход</button>`
+    : "";
+  return `
+    <section class="solo-phrases" id="soloPhrasesPanel">
+      <h2 class="solo-phrases__title">Фразы над ходом</h2>
+      <p class="hand-note">Лад: ${modeTitle}. Короткие мотивы по аккордам — тоны и краска лада.</p>
+      <div class="chip-row solo-phrase-flavor" role="group" aria-label="Стиль фраз">
+        <button type="button" class="chip chip-btn ${flavor === "simple" ? "is-on" : ""}" data-solo-phrase-flavor="simple">Просто</button>
+        <button type="button" class="chip chip-btn ${flavor === "spicy" ? "is-on" : ""}" data-solo-phrase-flavor="spicy">Хитро</button>
+        ${pathBtn}
+      </div>
+      <div class="solo-phrase-slots">${slotsHtml}</div>
+    </section>`;
+}
+
 function simpleNextRoles(isMin) {
   return isMin
     ? [
@@ -1834,6 +1908,7 @@ function renderSolo() {
       <p class="hand-note">Те же правила, что в Песне: покрытие хода, характер, безопасная пентатоника.</p>
       <div class="solo-mode-list">${modesHtml}</div>
     </section>
+    ${renderSoloPhrasesBlock(suggestion, voice)}
     ${renderPdfPreviewBlock()}
     <div class="actions sticky-actions">
       <button type="button" class="btn btn-glow" id="exportPdf3">${plus ? "Выгрузить PDF" : "Показать лист PDF"}</button>
@@ -1853,9 +1928,25 @@ function renderSolo() {
       renderSolo();
     });
   });
+  stage.querySelectorAll("[data-solo-phrase-flavor]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setSoloPhraseFlavor(btn.dataset.soloPhraseFlavor);
+      renderSolo();
+    });
+  });
   bindMelodyPlayButtons(stage);
   bindPdfPreviewActions();
   suggestion?.modes?.forEach((m) => window.LadAudio?.prefetchMelody?.(m.midis, 55));
+  const phrasePack =
+    suggestion?.modes?.[0] && typeof LadTheory !== "undefined"
+      ? LadTheory.suggestSoloPhrases?.(riffSoloItem(), suggestion.modes[0], {
+          flavor: resolveSoloPhraseFlavor(),
+        })
+      : null;
+  phrasePack?.slots?.forEach((slot) =>
+    slot.phrases?.forEach((ph) => window.LadAudio?.prefetchMelody?.(ph.midis, 48))
+  );
+  if (phrasePack?.pathMidis?.length) window.LadAudio?.prefetchMelody?.(phrasePack.pathMidis, 40);
 }
 
 /* ---------- chrome ---------- */

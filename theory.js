@@ -1334,6 +1334,206 @@
     return midis;
   }
 
+  function soloSpellPc(pc, flats) {
+    const i = ((pc % 12) + 12) % 12;
+    return flats ? DEG_NOTES_FLAT[i] : DEG_NOTES_SHARP[i];
+  }
+
+  function soloNearestMidi(pc, prefer = 60, lo = 50, hi = 81) {
+    const want = ((pc % 12) + 12) % 12;
+    let best = null;
+    let bestDist = 1e9;
+    for (let m = lo; m <= hi; m++) {
+      if ((((m % 12) + 12) % 12) !== want) continue;
+      const d = Math.abs(m - prefer);
+      if (d < bestDist) {
+        bestDist = d;
+        best = m;
+      }
+    }
+    return best == null ? prefer : best;
+  }
+
+  function soloMidiLine(pcs, prefer = 60) {
+    const midis = [];
+    let cursor = prefer;
+    for (const pc of pcs) {
+      const m = soloNearestMidi(pc, cursor);
+      midis.push(m);
+      cursor = m;
+    }
+    return midis;
+  }
+
+  function soloCharInterval(defId) {
+    if (defId === "dorian") return 9;
+    if (defId === "aeolian") return 8;
+    if (defId === "phrygian") return 1;
+    if (defId === "lydian") return 6;
+    if (defId === "mixolydian") return 10;
+    if (defId === "harmonic_minor") return 11;
+    if (defId === "blues") return 6;
+    if (defId === "minor_pent") return 3;
+    if (defId === "major_pent") return 4;
+    if (defId === "ionian") return 4;
+    return 7;
+  }
+
+  function soloScaleNeighbor(scaleSet, pc, dir) {
+    const start = ((pc % 12) + 12) % 12;
+    for (let step = 1; step <= 6; step++) {
+      const cand = (start + dir * step + 120) % 12;
+      if (scaleSet.has(cand)) return cand;
+    }
+    return (start + dir + 12) % 12;
+  }
+
+  function soloPhrasePack(id, midis, flats, titles, whys) {
+    const notes = midis.map((m) => soloSpellPc(m, flats));
+    return {
+      id,
+      notes,
+      midis: midis.slice(),
+      titlePlain: titles.plain,
+      titlePro: titles.pro,
+      whyPlain: whys.plain,
+      whyPro: whys.pro,
+    };
+  }
+
+  /**
+   * Короткие фразы над каждым аккордом хода в выбранном ладу.
+   * flavor: simple | spicy
+   */
+  function suggestSoloPhrases(slotItem, mode, opts = {}) {
+    if (!slotItem?.path?.length || !mode?.intervals?.length) return null;
+    const flavor = opts.flavor === "spicy" ? "spicy" : "simple";
+    const start = slotItem.start || slotItem.path[0];
+    const parsed = degParseChord(start);
+    if (!parsed) return null;
+    const homeMinor = !!parsed.isMinor;
+    let flats = degPreferFlats(parsed.root, homeMinor || parsed.isDom7);
+    if (mode.intervals.includes(6) || (homeMinor && mode.intervals.includes(9))) flats = false;
+    if (mode.intervals.includes(1) || mode.intervals.includes(8)) {
+      flats = degPreferFlats(parsed.root, true);
+    }
+    const tonicPc = degNoteIndex(parsed.root);
+    if (tonicPc < 0) return null;
+    const scaleSet = new Set(mode.intervals.map((iv) => (tonicPc + iv) % 12));
+    const charIv = soloCharInterval(mode.id);
+    const charPc = (tonicPc + charIv) % 12;
+
+    let prefer = 60;
+    const slots = slotItem.path.map((sym, idx) => {
+      const chordPcs = soloChordPcs(sym);
+      const rootPc = chordPcs[0] != null ? chordPcs[0] : tonicPc;
+      const thirdPc = chordPcs[1] != null ? chordPcs[1] : (rootPc + (degParseChord(sym)?.isMinor ? 3 : 4)) % 12;
+      const fifthPc = chordPcs[2] != null ? chordPcs[2] : (rootPc + 7) % 12;
+      const seventhPc = chordPcs[3];
+      const tones = [rootPc, thirdPc, fifthPc].concat(seventhPc != null ? [seventhPc] : []);
+
+      const phrases = [];
+      if (flavor === "simple") {
+        const arpPcs = tones.slice(0, Math.min(4, tones.length));
+        const arpMidis = soloMidiLine(arpPcs, prefer);
+        phrases.push(
+          soloPhrasePack(
+            `${mode.id}-${idx}-arp`,
+            arpMidis,
+            flats,
+            { plain: "Тоны аккорда вверх", pro: "Arpeggio · chord tones" },
+            {
+              plain: "Опора на звуки самого аккорда — фраза «попадает» в смену гармонии.",
+              pro: "Chord-tone cell · якорь на смене слота.",
+            }
+          )
+        );
+        prefer = soloNearestMidi((arpMidis[arpMidis.length - 1] || prefer) % 12, 62);
+
+        const nb = soloScaleNeighbor(scaleSet, thirdPc, -1);
+        const fillPcs = [rootPc, nb, thirdPc, fifthPc].filter((pc, i, arr) => arr.indexOf(pc) === i);
+        const fillMidis = soloMidiLine(fillPcs, prefer);
+        phrases.push(
+          soloPhrasePack(
+            `${mode.id}-${idx}-fill`,
+            fillMidis,
+            flats,
+            { plain: "Ступени лада к терции", pro: "Scale approach → 3rd" },
+            {
+              plain: "Короткий ход по ладу с посадкой на терцию аккорда.",
+              pro: "Диатонический подход к терции.",
+            }
+          )
+        );
+        prefer = soloNearestMidi((fillMidis[fillMidis.length - 1] || prefer) % 12, 62);
+      } else {
+        const below = (thirdPc + 11) % 12;
+        const above = soloScaleNeighbor(scaleSet, thirdPc, 1);
+        const encMidis = soloMidiLine([below, above, thirdPc, fifthPc], prefer);
+        phrases.push(
+          soloPhrasePack(
+            `${mode.id}-${idx}-enc`,
+            encMidis,
+            flats,
+            { plain: "Обход терции", pro: "Enclosure → 3rd" },
+            {
+              plain: "Подход с полутона ниже и ступени выше — терция звучит ярче.",
+              pro: "Хроматический + диатонический обход терции.",
+            }
+          )
+        );
+        prefer = soloNearestMidi((encMidis[encMidis.length - 1] || prefer) % 12, 62);
+
+        const land = tones.includes(charPc) ? charPc : thirdPc;
+        const via = scaleSet.has(charPc) ? charPc : soloScaleNeighbor(scaleSet, land, -1);
+        const colorPcs = [rootPc, via, land, fifthPc].filter((pc, i, arr) => arr.indexOf(pc) === i);
+        const colorMidis = soloMidiLine(colorPcs, prefer);
+        const charName = soloSpellPc(charPc, flats);
+        phrases.push(
+          soloPhrasePack(
+            `${mode.id}-${idx}-color`,
+            colorMidis,
+            flats,
+            { plain: "Характерная краска", pro: "Mode color tone" },
+            {
+              plain: `Вкус лада через ${charName} с разрешением в тон аккорда.`,
+              pro: `Характерный тон лада (${charName}) → chord tone.`,
+            }
+          )
+        );
+        prefer = soloNearestMidi((colorMidis[colorMidis.length - 1] || prefer) % 12, 62);
+      }
+
+      return { index: idx, symbol: sym, phrases };
+    });
+
+    const pathMidis = [];
+    for (const slot of slots) {
+      const lead = slot.phrases[0];
+      if (lead?.midis?.length) pathMidis.push(...lead.midis);
+    }
+
+    return {
+      flavor,
+      modeId: mode.id,
+      modeNamePlain: mode.namePlain,
+      modeNamePro: mode.namePro,
+      home: soloSpellPc(tonicPc, flats),
+      slots,
+      pathMidis,
+    };
+  }
+
+  function soloPhraseTitle(phrase, voice) {
+    if (!phrase) return "";
+    return (voice || getVoice()) === "plain" ? phrase.titlePlain : phrase.titlePro;
+  }
+
+  function soloPhraseWhy(phrase, voice) {
+    if (!phrase) return "";
+    return (voice || getVoice()) === "plain" ? phrase.whyPlain : phrase.whyPro;
+  }
+
   function soloWhy(def, ctx) {
     const { fitCount, total, degrees, charHint, plain } = ctx;
     const cover = `${fitCount} из ${total}`;
@@ -1564,6 +1764,9 @@
     bindDegreesScreen,
     renderDegreesLink,
     suggestSoloModes,
+    suggestSoloPhrases,
+    soloPhraseTitle,
+    soloPhraseWhy,
     soloModeTitle,
     soloModeWhy,
   };
