@@ -2048,6 +2048,34 @@ button[data-open-degrees].btn-glow {
 .next-chord-card__diag .chord-diag {
   margin: 0;
 }
+
+.next-flavor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.55rem 0 0.75rem;
+}
+.next-chord-card.is-spicy {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: linear-gradient(165deg, rgba(56, 32, 18, 0.9), rgba(16, 12, 10, 0.72));
+}
+.next-chord-card__spice {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1a1008;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.next-chord-card__spice.is-simple {
+  color: var(--ink-mute);
+  background: transparent;
+  border: 1px solid var(--line);
+}
 .next-chord-card__actions {
   display: flex;
   flex-wrap: wrap;

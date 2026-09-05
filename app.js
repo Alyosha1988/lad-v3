@@ -24,6 +24,8 @@ const state = {
   pdfPreview: false,
   soloBoxesModeId: null,
   developMood: null, // null = авто по первому аккорду
+  /** @type {"simple"|"spicy"|"both"} */
+  nextFlavor: (typeof localStorage !== "undefined" && localStorage.getItem("lad-riff-next-flavor")) || "both",
   loop: {
     tempo: 90,
     patternId: "folk",
@@ -969,18 +971,25 @@ function pathKeyCenter() {
   return { symbol: start, key, degrees };
 }
 
-/**
- * Следующие аккорды по функции в тональности хода (не целые обороты).
- * Центр — первый аккорд пути.
- */
-function buildFunctionalNextChords(path) {
-  if (!path?.length) return [];
-  const last = path[path.length - 1];
-  const { key, degrees: d } = pathKeyCenter();
-  if (!key || !d) return [];
 
-  const isMin = key.mode === "minor";
-  const roles = isMin
+const NEXT_FLAVOR_KEY = "lad-riff-next-flavor";
+
+function resolveNextFlavor() {
+  const v = state.nextFlavor;
+  if (v === "simple" || v === "spicy" || v === "both") return v;
+  return "both";
+}
+
+function setNextFlavor(id) {
+  const v = id === "simple" || id === "spicy" || id === "both" ? id : "both";
+  state.nextFlavor = v;
+  try {
+    localStorage.setItem(NEXT_FLAVOR_KEY, v);
+  } catch (_) {}
+}
+
+function simpleNextRoles(isMin) {
+  return isMin
     ? [
         { deg: "V7", role: "доминанта", why: "Острая тяга обратно к тонике." },
         { deg: "iv", role: "субдоминанта", why: "Плагальный шаг внутрь минора." },
@@ -990,7 +999,6 @@ function buildFunctionalNextChords(path) {
         { deg: "iim7b5", role: "iiø", why: "Подготовка к доминанте (ii–V)." },
         { deg: "v", role: "v минор", why: "Мягкая доминанта без острого V7." },
         { deg: "IV", role: "IV мажор", why: "Дорийский свет поверх минора." },
-        { deg: "II7", role: "V/V", why: "Вторичная доминанта к V." },
         { deg: "i", role: "тоника", why: "Возврат домой." },
       ]
     : [
@@ -1001,11 +1009,68 @@ function buildFunctionalNextChords(path) {
         { deg: "ii", role: "ii", why: "Подготовка к V (ii–V–I)." },
         { deg: "iii", role: "iii", why: "Мягкий подъём без драмы." },
         { deg: "bVII", role: "bVII", why: "Миксолидийский / рок-заимствование." },
-        { deg: "V7ofV", role: "V/V", why: "Вторичная доминанта к V." },
-        { deg: "V7ofvi", role: "V/vi", why: "Вторичная доминанта к относительному минору." },
         { deg: "I", role: "тоника", why: "Возврат домой." },
       ];
+}
 
+function spicyNextRoles(isMin) {
+  return isMin
+    ? [
+        { deg: "bIaug", role: "подход +", why: "Хроматический подход к тонике: общий терцовый каркас, сдвиг корня на полтона (как Am → Abaug)." },
+        { deg: "bVIaug", role: "bVI+", why: "Увеличенная краска от bVI — киношный поворот перед V или тоникой." },
+        { deg: "imaj7", role: "i(maj7)", why: "Тоника с мажорной септимой — джазовый «внутренний» свет." },
+        { deg: "V7alt", role: "V7alt", why: "Альтерированная доминанта: максимальное напряжение перед i." },
+        { deg: "V7sharp9", role: "V7#9", why: "Доминанта с #9 — блюз/фьюжн-огонь." },
+        { deg: "V7flat9", role: "V7b9", why: "Доминанта с b9 — тёмный джазовый укол." },
+        { deg: "VIIdim7", role: "vii°7", why: "Уменьшённый проход / ведущий тон — вкручивает в тонику." },
+        { deg: "subV", role: "субV", why: "Тритоновая замена доминанты — сдвиг на полтона вниз вместо V7." },
+        { deg: "bIImaj", role: "bII", why: "Неаполитанская краска — фригийский привкус." },
+        { deg: "bIImaj7", role: "bIImaj7", why: "Неаполитанский мажор-септаккорд — мягче, чем голый bII." },
+        { deg: "bVImaj7", role: "bVImaj7", why: "Кино / баллада: широкая мажорная краска над минором." },
+        { deg: "II7", role: "V/V", why: "Вторичная доминанта к V — разгон перед каденцией." },
+      ]
+    : [
+        { deg: "Iaug", role: "I+", why: "Увеличенная тоника — сдвиг вверх, часто в припев или как обман." },
+        { deg: "bVIaug", role: "bVI+", why: "Хроматическая медианта с увеличением — неожиданный свет/тень." },
+        { deg: "bIIIaug", role: "bIII+", why: "Увеличенный медиант — поп/прог-поворот." },
+        { deg: "Imaj7sharp11", role: "Imaj7#11", why: "Лидийская тоника — воздушная «хитрая» устойчивость." },
+        { deg: "V7alt", role: "V7alt", why: "Альтерированная доминанта перед I." },
+        { deg: "V7sharp9", role: "V7#9", why: "Доминанта с #9 — фанк/блюз-напряжение." },
+        { deg: "V7flat9", role: "V7b9", why: "Доминанта с b9 — джазовый укол к I." },
+        { deg: "subV", role: "субV", why: "Тритоновая замена V — доминанта на полтона выше тоники." },
+        { deg: "bIImaj7", role: "bIImaj7", why: "Неаполитанский мажор-септаккорд — модальная тень." },
+        { deg: "#IVdim", role: "#iv°7", why: "Уменьшённый проход к V или I." },
+        { deg: "viidim7", role: "vii°7", why: "Вводный уменьшённый — классический вкруток в тонику." },
+        { deg: "bVImaj7", role: "bVImaj7", why: "Заимствование из минора — эпичная краска." },
+        { deg: "V7ofV", role: "V/V", why: "Вторичная доминанта к V." },
+        { deg: "V7ofvi", role: "V/vi", why: "Вторичная доминанта к относительному минору." },
+      ];
+}
+
+/**
+ * Следующие аккорды по функции в тональности хода.
+ * flavor: simple | spicy | both
+ */
+function buildFunctionalNextChords(path) {
+  if (!path?.length) return [];
+  const last = path[path.length - 1];
+  const { key, degrees: d } = pathKeyCenter();
+  if (!key || !d) return [];
+
+  const isMin = key.mode === "minor";
+  const flavor = resolveNextFlavor();
+  const roles = [];
+  if (flavor === "simple" || flavor === "both") {
+    simpleNextRoles(isMin).forEach((r) => roles.push({ ...r, spice: "simple" }));
+  }
+  if (flavor === "spicy" || flavor === "both") {
+    // в режиме «все» хитрые сверху — их как раз не хватало
+    const spicy = spicyNextRoles(isMin).map((r) => ({ ...r, spice: "spicy" }));
+    if (flavor === "both") roles.unshift(...spicy);
+    else roles.push(...spicy);
+  }
+
+  const limit = flavor === "both" ? 10 : 8;
   const out = [];
   const seen = new Set();
   for (const r of roles) {
@@ -1016,13 +1081,14 @@ function buildFunctionalNextChords(path) {
       kind: "next",
       symbol: sym,
       role: r.role,
+      spice: r.spice,
       title: `Далее → ${sym}`,
       why: `${r.role}: ${r.why}`,
       path: path.concat(sym),
       addSymbol: sym,
       degree: r.deg,
     });
-    if (out.length >= 8) break;
+    if (out.length >= limit) break;
   }
   return out;
 }
@@ -1054,8 +1120,8 @@ function buildIdeas() {
   // 1) функциональные «следующие аккорды» — отдельный блок
   const next = buildFunctionalNextChords(path);
 
-  // дополнение из каталога, если функция дала мало
-  if (next.length < 5) {
+  // дополнение из каталога, если функция дала мало (только в «просто» / «все»)
+  if (next.length < 5 && resolveNextFlavor() !== "spicy") {
     const have = new Set(next.map((n) => n.symbol));
     nextChordsFromCatalog(last, catalog).forEach((n) => {
       if (have.has(n.symbol) || symbolsMatch(n.symbol, last)) return;
@@ -1064,6 +1130,7 @@ function buildIdeas() {
         kind: "next",
         symbol: n.symbol,
         role: "из каталога",
+        spice: "simple",
         title: `Далее → ${n.symbol}`,
         why: n.why || `Частый шаг после ${last} в каталоге Песни.`,
         path: path.concat(n.symbol),
@@ -1224,10 +1291,28 @@ function playSymbolPathPreview(symbols, seed = lastPathVoicing()) {
 }
 
 function renderNextChordBlock(nextIdeas, key) {
-  if (!nextIdeas?.length) return "";
+  if (!nextIdeas?.length && !pathSymbols().length) return "";
   const keyHint = key
     ? `${key.tonic}${key.mode === "minor" ? "m" : key.mode === "mixo" ? "7" : ""}`
     : pathSymbols()[0] || "";
+  const flavor = resolveNextFlavor();
+  const flavorChips = `
+    <div class="chip-row next-flavor" role="group" aria-label="Сложность следующего аккорда">
+      <button type="button" class="chip chip-btn ${flavor === "simple" ? "is-on" : ""}" data-next-flavor="simple">Просто</button>
+      <button type="button" class="chip chip-btn ${flavor === "spicy" ? "is-on" : ""}" data-next-flavor="spicy">Хитро</button>
+      <button type="button" class="chip chip-btn ${flavor === "both" ? "is-on" : ""}" data-next-flavor="both">Все</button>
+    </div>`;
+  if (!nextIdeas?.length) {
+    return `
+    <section class="next-chord-block" aria-label="Следующий аккорд">
+      <div class="next-chord-block__head">
+        <p class="kicker">Следующий аккорд</p>
+        <p class="hand-note">По функции в тональности ${keyHint}</p>
+      </div>
+      ${flavorChips}
+      <p class="hand-note">Нет вариантов в этом режиме — переключите «Просто / Хитро».</p>
+    </section>`;
+  }
   const ref = lastPathVoicing();
   const cards = nextIdeas
     .map((idea) => {
@@ -1239,9 +1324,15 @@ function renderNextChordBlock(nextIdeas, key) {
       const fretAttr = v?.frets ? ` data-preview-frets="${v.frets.join(",")}"` : "";
       const midiAttr = v?.midis ? ` data-preview-midis="${v.midis.join(",")}"` : "";
       const gripHint = v?.name ? `<p class="next-chord-card__grip">${v.name}</p>` : "";
+      const spice =
+        idea.spice === "spicy"
+          ? `<span class="next-chord-card__spice">хитро</span>`
+          : idea.spice === "simple"
+            ? `<span class="next-chord-card__spice is-simple">просто</span>`
+            : "";
       return `
-      <article class="next-chord-card">
-        <p class="next-chord-card__role">${idea.role || "далее"}</p>
+      <article class="next-chord-card ${idea.spice === "spicy" ? "is-spicy" : ""}">
+        <p class="next-chord-card__role">${idea.role || "далее"}${spice}</p>
         <h3 class="next-chord-card__sym">${idea.symbol}</h3>
         <p class="next-chord-card__why">${idea.why}</p>
         ${gripHint}
@@ -1259,9 +1350,11 @@ function renderNextChordBlock(nextIdeas, key) {
         <p class="kicker">Следующий аккорд</p>
         <p class="hand-note">По функции в тональности ${keyHint} · постановка рядом с вашим хватом · один шаг</p>
       </div>
+      ${flavorChips}
       <div class="next-chord-grid">${cards}</div>
     </section>`;
 }
+
 
 function renderIdeaCard(idea) {
   let extra = "";
@@ -1412,6 +1505,14 @@ function renderDevelop() {
     } catch (_) {
       flash("Не удалось сохранить.");
     }
+  });
+
+
+  stage.querySelectorAll("[data-next-flavor]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setNextFlavor(btn.dataset.nextFlavor);
+      renderDevelop();
+    });
   });
 
   stage.querySelectorAll("[data-dev-mood]").forEach((btn) => {

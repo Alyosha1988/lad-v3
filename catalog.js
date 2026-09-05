@@ -175,6 +175,13 @@ function degreeMap(key) {
       Imaj: ch(T, "", flats),
       Isus2: ch(T, "sus2", flats),
       iadd9: ch(T, "madd9", flats),
+      imaj7: ch(T, "m(maj7)", flats),
+      bVIaug: ch(transpose(T, 8), "aug", flats),
+      bIaug: ch(transpose(T, 11), "aug", flats),
+      bIImaj: ch(transpose(T, 1), "", flats),
+      bIImaj7: ch(transpose(T, 1), "maj7", flats),
+      V7sharp9: ch(transpose(T, 7), "7#9", flats),
+      V7flat9: ch(transpose(T, 7), "7b9", flats),
     };
   }
 
@@ -228,6 +235,15 @@ function degreeMap(key) {
     II: ch(transpose(T, 2), "", flats),
     "II7": ch(transpose(T, 2), "7", flats),
     "#IVdim": ch(transpose(T, 6), "dim7", flats),
+    Iaug: ch(T, "aug", flats),
+    Imaj7sharp11: ch(T, "maj7#11", flats),
+    bVIaug: ch(transpose(T, 8), "aug", flats),
+    bIIIaug: ch(transpose(T, 3), "aug", flats),
+    bIImaj: ch(transpose(T, 1), "", flats),
+    bIImaj7: ch(transpose(T, 1), "maj7", flats),
+    V7sharp9: ch(transpose(T, 7), "7#9", flats),
+    V7flat9: ch(transpose(T, 7), "7b9", flats),
+    viidim7: ch(transpose(T, 11), "dim7", flats),
   };
 }
 
