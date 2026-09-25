@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="14" fill="#f5f5f7"/>
-  <rect x="12" y="16" width="40" height="34" rx="6" stroke="#1d1d1f" stroke-width="2.4"/>
-  <!-- white key dividers -->
-  <path d="M25.3 18.5v29.5M38.7 18.5v29.5" stroke="#1d1d1f" stroke-width="2"/>
-  <!-- black keys -->
-  <rect x="20.5" y="18.5" width="9" height="16" rx="1.5" fill="#1d1d1f"/>
-  <rect x="34.5" y="18.5" width="9" height="16" rx="1.5" fill="#1d1d1f"/>
-</svg>
