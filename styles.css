@@ -98,11 +98,12 @@ body {
 
 .topbar {
   display: grid;
-  grid-template-columns: 2.5rem 1fr auto;
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
   gap: 0.55rem;
   align-items: center;
-  height: var(--nav-h);
-  padding: 0;
+  min-height: var(--nav-h);
+  height: auto;
+  padding: 0.35rem 0;
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
@@ -121,7 +122,11 @@ body.is-mood-home .topbar {
 body.is-mood-home .brand-wrap { display: none; }
 body.is-mood-home .icon-btn[hidden] { display: none; }
 
-.brand-wrap { text-align: left; }
+.brand-wrap {
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+}
 
 .brand {
   margin: 0;
@@ -140,6 +145,10 @@ body.is-mood-home .icon-btn[hidden] { display: none; }
   letter-spacing: var(--tracking-body);
   text-transform: none;
   color: var(--ink-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .icon-btn {
@@ -160,28 +169,28 @@ body.is-mood-home .icon-btn[hidden] { display: none; }
   appearance: none;
   width: 2.5rem;
   height: 2.5rem;
-  padding: 0;
+  padding: 2px;
   border-radius: 50%;
   border: 1px solid var(--line-strong);
-  background: var(--bg);
+  background: var(--bg-soft);
   overflow: hidden;
   cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .instrument-btn img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
-  filter: grayscale(0.25) contrast(1.05) brightness(0.95);
+  border-radius: 50%;
 }
 
 .instrument-btn.is-active {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--bg);
 }
-
-.instrument-btn.is-active img { filter: none; }
 
 .stage {
   flex: 1;
@@ -467,11 +476,13 @@ body.is-mood-home .icon-btn[hidden] { display: none; }
 .h1 {
   margin: 0 0 var(--space-2);
   font-family: var(--font-display);
-  font-size: clamp(1.7rem, 6vw, 2.25rem);
+  font-size: clamp(1.55rem, 5.5vw, 2.1rem);
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--tracking-display);
   line-height: var(--lh-tight);
   color: var(--ink);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .lead {
@@ -614,6 +625,9 @@ body.is-mood-home .icon-btn[hidden] { display: none; }
   padding: 11px 21px;
   min-height: 44px;
   cursor: pointer;
+  line-height: 1.25;
+  text-align: center;
+  max-width: 100%;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
@@ -2063,12 +2077,21 @@ button[data-open-degrees].btn-glow {
   position: sticky;
   bottom: calc(4.2rem + env(safe-area-inset-bottom));
   z-index: 12;
-  padding: 0.55rem 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: stretch;
+  padding: 0.55rem 0.45rem;
   border-radius: 14px;
   background: var(--nav-bg);
   backdrop-filter: var(--nav-blur);
   -webkit-backdrop-filter: var(--nav-blur);
   border: 1px solid var(--line);
+}
+
+.sticky-actions .btn {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .slot-list { display: grid; gap: 0.75rem; }
 .slot-card {
@@ -2394,4 +2417,114 @@ button[data-open-degrees].btn-glow {
   display: grid;
   gap: 0.75rem;
   margin: 0.75rem 0 1rem;
+}
+
+
+/* ----- riff apple overflow polish ----- */
+.shell {
+  overflow-x: clip;
+}
+
+.hand-note,
+.lead,
+.kicker,
+.next-chord-card__why,
+.idea-card__why,
+.slot-card__density,
+.slot-card__voicing,
+.voicing-card__name {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chip-row {
+  row-gap: 0.4rem;
+}
+
+.chip,
+.chip-btn {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.voicing-card__name {
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.next-chord-card__sym,
+.idea-card__title {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.next-chord-card__actions,
+.slot-card__actions,
+.voicing-card__actions,
+.actions,
+.fb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.next-chord-card__actions .btn,
+.slot-card__actions .btn,
+.fb-actions .btn {
+  flex: 1 1 auto;
+  min-width: min(100%, 8.5rem);
+}
+
+.btn-tiny {
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.tab {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.instrument-bar {
+  flex-shrink: 0;
+}
+
+@media (max-width: 420px) {
+  .brand {
+    font-size: 1.15rem;
+  }
+
+  .brand-tag {
+    font-size: 11px;
+  }
+
+  .btn {
+    font-size: 15px;
+    padding: 10px 16px;
+  }
+
+  .sticky-actions .btn {
+    flex: 1 1 calc(50% - 0.3rem);
+  }
+
+  .next-chord-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .h1 {
+    font-size: clamp(1.4rem, 7vw, 1.75rem);
+  }
+
+  .topbar {
+    gap: 0.4rem;
+  }
+
+  .instrument-btn {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
 }
