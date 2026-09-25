@@ -2073,15 +2073,21 @@ button[data-open-degrees].btn-glow {
   margin-top: 0.35rem;
 }
 .voicing-card .chord-diag { margin: 0 auto; }
+/* In-flow CTA row (not fixed/sticky): fixed dock was covering Послушать/Сбросить and fret cells */
 .sticky-actions {
-  position: sticky;
-  bottom: calc(4.2rem + env(safe-area-inset-bottom));
-  z-index: 12;
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  width: 100%;
+  box-sizing: border-box;
+  z-index: 5;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
   align-items: stretch;
-  padding: 0.55rem 0.45rem;
+  padding: 0.5rem 0.4rem;
+  margin: 0.85rem 0 0.35rem;
   border-radius: 14px;
   background: var(--nav-bg);
   backdrop-filter: var(--nav-blur);
@@ -2090,8 +2096,10 @@ button[data-open-degrees].btn-glow {
 }
 
 .sticky-actions .btn {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 .slot-list { display: grid; gap: 0.75rem; }
 .slot-card {
@@ -2508,7 +2516,9 @@ button[data-open-degrees].btn-glow {
   }
 
   .sticky-actions .btn {
-    flex: 1 1 calc(50% - 0.3rem);
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 14px;
   }
 
   .next-chord-grid {
