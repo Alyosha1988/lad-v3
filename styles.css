@@ -2011,19 +2011,25 @@ button[data-open-degrees].btn-glow {
   border-radius: 0 0 6px 6px;
   background: #ffffff;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .pk-white.is-on { background: var(--accent); }
 .piano-blacks { position: absolute; inset: 0 0 40% 0; pointer-events: none; }
 .pk-black {
   pointer-events: auto;
   position: absolute;
-  width: 7%;
+  /* width задаётся инлайном от числа белых (~0.58 ширины белой) */
+  width: 4%;
   height: 100%;
   transform: translateX(-50%);
   border: none;
   border-radius: 0 0 4px 4px;
   background: #1d1d1f;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  z-index: 1;
 }
 .pk-black.is-on { background: var(--accent); box-shadow: none; }
 

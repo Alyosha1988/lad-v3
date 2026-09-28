@@ -545,18 +545,30 @@ function renderGuitarBoard() {
 
 function renderPianoBoard() {
   const on = new Set(state.piano);
-  // C3–B4 visual whites + blacks
+  // C3–C5 visual whites + blacks
   const start = 48;
   const end = 72;
+  const isBlackPc = (m) => [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12);
+  const whiteMidis = [];
+  for (let m = start; m <= end; m++) {
+    if (!isBlackPc(m)) whiteMidis.push(m);
+  }
+  const nWhite = whiteMidis.length || 1;
+  // чёрные — на границе белых (не по линейной midi-шкале), иначе наезд hitbox
+  const blackWidthPct = (0.58 / nWhite) * 100;
   let whites = "";
   let blacks = "";
   for (let m = start; m <= end; m++) {
-    const pc = m % 12;
-    const isBlack = [1, 3, 6, 8, 10].includes(pc);
-    if (isBlack) {
-      blacks += `<button type="button" class="pk pk-black ${on.has(m) ? "is-on" : ""}" data-midi="${m}" style="left:${((m - start) / (end - start)) * 100}%"></button>`;
+    if (isBlackPc(m)) {
+      let whitesBefore = 0;
+      for (let i = 0; i < whiteMidis.length; i++) {
+        if (whiteMidis[i] < m) whitesBefore += 1;
+        else break;
+      }
+      const left = (whitesBefore / nWhite) * 100;
+      blacks += `<button type="button" class="pk pk-black ${on.has(m) ? "is-on" : ""}" data-midi="${m}" style="left:${left}%;width:${blackWidthPct}%" aria-label="Клавиша ${m}"></button>`;
     } else {
-      whites += `<button type="button" class="pk pk-white ${on.has(m) ? "is-on" : ""}" data-midi="${m}"></button>`;
+      whites += `<button type="button" class="pk pk-white ${on.has(m) ? "is-on" : ""}" data-midi="${m}" aria-label="Клавиша ${m}"></button>`;
     }
   }
   return `
@@ -586,7 +598,8 @@ function renderVoicingStrip(symbol, list) {
       if (v.frets && typeof renderChordSvg === "function") {
         diag = renderChordSvg(symbol, v, { width: 92, height: 120 });
       } else if (v.midis && typeof renderPianoSvg === "function") {
-        diag = renderPianoSvg({ symbol, midis: v.midis, fingers: typeof pianoFingers === "function" ? pianoFingers(v.midis) : [] });
+        const fingers = typeof pianoFingers === "function" ? pianoFingers(v.midis) : [];
+        diag = renderPianoSvg({ symbol, midis: v.midis, fingers });
       }
       const play =
         v.frets

@@ -266,8 +266,17 @@ function pickPianoSequence(path) {
   return seq;
 }
 
+function midiNoteNames(midis) {
+  const names =
+    typeof PC_NAMES !== "undefined"
+      ? PC_NAMES
+      : ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+  return (midis || []).map((m) => names[((m % 12) + 12) % 12]);
+}
+
 function renderPianoSvg(item, opts = {}) {
-  const midis = item.midis;
+  const midis = (item?.midis || []).map((n) => Number(n)).filter((n) => Number.isFinite(n));
+  if (!midis.length) return "";
   const minM = Math.min(...midis);
   const maxM = Math.max(...midis);
   // window of white keys covering the voicing + padding
@@ -290,9 +299,10 @@ function renderPianoSvg(item, opts = {}) {
   const blackW = 9;
 
   const active = new Set(midis);
+  const fingers = Array.isArray(item.fingers) ? item.fingers : pianoFingers(midis);
   const fingerOf = {};
   midis.forEach((m, i) => {
-    fingerOf[m] = item.fingers[i];
+    fingerOf[m] = fingers[i];
   });
 
   let svg = "";
@@ -319,7 +329,8 @@ function renderPianoSvg(item, opts = {}) {
     }
   });
 
-  const noteLabel = item.notes.join("·");
+  // notes may be omitted by board/voicing callers — derive from midis so strip render never throws
+  const noteLabel = (Array.isArray(item.notes) && item.notes.length ? item.notes : midiNoteNames(midis)).join("·");
   const step = opts.step != null ? `<span class="diag-step">${opts.step}</span>` : "";
   const playNotes = midis.join(",");
 
@@ -756,5 +767,8 @@ if (typeof module !== "undefined" && module.exports) {
     renderMelodyDiagramSvg,
     renderMelodyPianoSvg,
     renderPhraseFingering,
+    renderPianoSvg,
+    pianoFingers,
+    midiNoteNames,
   };
 }
